@@ -1,0 +1,99 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Team 1 · Claude Code exercise</title><style>
+:root { --y: #FFB838; --ink: #34322E; --mut: #6b675f; --line: #e6e2da; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: #fff; }
+header { background: var(--y); padding: 32px 24px 24px; }
+header .k { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; opacity: .7; }
+header h1 { margin: 6px 0 14px; font-size: 40px; font-weight: 500; }
+header .where { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 15px; }
+header a { color: inherit; font-weight: 600; }
+main { max-width: 980px; margin: 0 auto; padding: 8px 24px 64px; }
+h2.part { font-size: 28px; font-weight: 500; margin: 40px 0 8px; padding-top: 24px; border-top: 4px solid var(--y); }
+h2 { font-size: 19px; margin: 28px 0 8px; }
+h3 { font-size: 16px; margin: 0 0 6px; }
+.task { font-size: 20px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; }
+@media (max-width: 760px) { .cols { grid-template-columns: 1fr; } header h1 { font-size: 30px; } }
+ul, ol { padding-left: 22px; } li { margin: 4px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+td, th { text-align: left; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td:first-child { white-space: nowrap; }
+.demo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.demo div { background: #f6f4ef; border-radius: 8px; padding: 14px 16px; }
+.demo b { display: block; font-size: 22px; }
+.card { background: #f6f4ef; border-radius: 8px; padding: 14px 16px; }
+footer { color: var(--mut); font-size: 14px; margin-top: 48px; }</style></head><body>
+<header><div class="k">Claude Code exercise · Saab · 12–13 November 2026</div><h1>Team 1</h1>
+<div class="where"><span>Repo: <a href="https://github.com/vibe-jam-2026/team-1">github.com/vibe-jam-2026/team-1</a></span><span>Game: <a href="https://vibe-jam-2026.github.io/team-1/">vibe-jam-2026.github.io/team-1</a></span><span>Build at: <a href="https://claude.ai/code">claude.ai/code</a></span></div></header>
+<main>
+  <h2 class="part">Your task</h2>
+  <p class="task"><b>In two days, build a game that someone else can sit down and play.</b></p>
+  <p>You decide what game: any genre, as long as it runs in a browser from your team's GitHub Pages address. You get 3 hours on day 1 and 2 hours on day 2. Agree on your idea before day 1, and pick something small enough that it is playable by the end of day 1.</p>
+
+  <div class="cols">
+    <div>
+      <h2>Your tools</h2>
+      <ul>
+        <li>One Claude Pro login, sent to you by email. <b>Log in at claude.ai/code and test it before day 1</b>; there is no setup in the room.</li>
+        <li>Claude Code writes the code. You decide what to build, instruct it clearly, check what it makes and steer it when it goes wrong.</li>
+        <li>One public GitHub repo with Pages: every push publishes the game at your address.</li>
+        <li>Any language or framework that gives static files for a browser. The internet is allowed.</li>
+      </ul>
+      <h2>Rules</h2>
+      <ol>
+        <li><b>No Saab code, documents or data, and nothing classified.</b> Public information and made-up data only. <b>Your repo is public</b>: anyone can see what you push.</li>
+        <li>Art, music and sound are made by you or Claude, or are free to use.</li>
+        <li>Claude Code writes most of the code. Say in the demo what you did by hand.</li>
+        <li>Building stops on the minute, both days. <b>No building overnight.</b></li>
+        <li>The demo is <b>5 minutes</b>, live, at your address, then 1 minute for questions. Have it ready.</li>
+        <li>After the demos everyone plays at each team's address.</li>
+      </ol>
+    </div>
+    <div>
+      <h2>Times</h2>
+      <table>
+        <tr><td><b>Before</b></td><td style="white-space:normal;color:inherit">Test the login, agree on the idea</td></tr>
+        <tr><td><b>Day 1 0:00</b></td><td style="white-space:normal;color:inherit">Kickoff, 10 minutes, then start building</td></tr>
+        <tr><td><b>1:30</b></td><td style="white-space:normal;color:inherit">Something that runs, however small</td></tr>
+        <tr><td><b>3:00</b></td><td style="white-space:normal;color:inherit">Stop: a first version someone can play</td></tr>
+        <tr><td><b>Day 2 0:00</b></td><td style="white-space:normal;color:inherit">Build on</td></tr>
+        <tr><td><b>0:45</b></td><td style="white-space:normal;color:inherit">Stop building, demos start</td></tr>
+        <tr><td><b>1:40</b></td><td style="white-space:normal;color:inherit">Play each other's games and vote</td></tr>
+      </table>
+      <h2>Working with Claude Code</h2>
+      <ul>
+        <li><b>Start small.</b> Get the simplest version running, then add one thing at a time.</li>
+        <li><b>Give it the goal</b>, not just the next step: who plays and what makes it fun.</li>
+        <li><b>Plan first</b> on big steps: "Make a plan before you write code."</li>
+        <li><b>Play it after every merge</b> at your address, and tell Claude what you saw.</li>
+        <li><b>Publish often.</b> Merge into main after every working step.</li>
+        <li><b>Describe what you see</b> when it fails: the error, or what the screen shows.</li>
+        <li><b>Share the steering.</b> Take turns writing the instructions.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Your demo: 5 minutes, then 1 minute for questions</h2>
+  <div class="demo">
+    <div><b>30 s</b>What the game is, and how you win</div>
+    <div><b>3 min</b>Play it live</div>
+    <div><b>1 min 30 s</b>What you learned about working with Claude</div>
+  </div>
+  
+
+
+  <h2 class="part">Your repo and how to publish</h2>
+  <p>Your repo is <a href="https://github.com/vibe-jam-2026/team-1"><b>github.com/vibe-jam-2026/team-1</b></a> and your game is published at <a href="https://vibe-jam-2026.github.io/team-1/"><b>vibe-jam-2026.github.io/team-1</b></a>. You are reading this page there now: your game replaces it. These instructions stay at <a href="instructions.html">vibe-jam-2026.github.io/team-1/instructions.html</a>.</p>
+  
+  <h2>How to publish</h2>
+  <ol>
+    <li>Send Adrian your GitHub usernames before day 1. He adds you to your team's repo with write access.</li>
+    <li>Open <b>claude.ai/code</b> in the browser, log in with your team's login and pick the repo <b>vibe-jam-2026/team-1</b>.</li>
+    <li>The game starts from <b>index.html</b> at the top of the repo. Everything the browser needs must be in the repo as static files: HTML, JavaScript, CSS, images and sound.</li>
+    <li>Claude pushes its work to a branch of its own. Publish by asking it to open a pull request, then click <b>Merge</b> on github.com, so the change lands in <b>main</b>.</li>
+    <li>GitHub Pages publishes every change to main by itself. About a minute later the new version is live at your address.</li>
+    <li>Built with a tool such as Vite? Put the finished files at the top of the repo or in <b>docs/</b>, and tell Adrian if you use docs/. Use relative paths, because your game lives under /team-1/.</li>
+  </ol>
+  
+<footer>Questions during the exercise: ask Adrian.</footer></main></body></html>
