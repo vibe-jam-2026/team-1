@@ -1,0 +1,40 @@
+# Publishes the game on GitHub Pages on every push to main.
+# The newest push always wins: a run still going is cancelled, so one stuck deployment never blocks the next.
+name: Publish
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url || steps.retry.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # the game is the top of the repo, or docs/ when only docs/ has an index.html (a built Vite app, say)
+      - id: site
+        run: if [ ! -f index.html ] && [ -f docs/index.html ]; then echo "path=docs" >> "$GITHUB_OUTPUT"; else echo "path=." >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ steps.site.outputs.path }}
+      - id: deploy
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+        with:
+          timeout: 240000
+      - id: retry
+        if: steps.deploy.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 240000
