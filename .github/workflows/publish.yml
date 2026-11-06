@@ -1,4 +1,4 @@
-# Publishes the game on GitHub Pages on every push to main.
+# Publishes the site on GitHub Pages on every push to main.
 # The newest push always wins: a run still going is cancelled, so one stuck deployment never blocks the next.
 name: Publish
 on:
@@ -21,7 +21,7 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url || steps.retry.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      # the game is the top of the repo, or docs/ when only docs/ has an index.html (a built Vite app, say)
+      # the site is the top of the repo, or docs/ when only docs/ has an index.html (a built Vite app, say)
       - id: site
         run: if [ ! -f index.html ] && [ -f docs/index.html ]; then echo "path=docs" >> "$GITHUB_OUTPUT"; else echo "path=." >> "$GITHUB_OUTPUT"; fi
       - uses: actions/configure-pages@v5
