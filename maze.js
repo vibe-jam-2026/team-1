@@ -28,8 +28,8 @@
   const W = 960, H = 600;              // logical screen size; scaled to fit the window
   const PLAYER_SPEED = 6.2;            // tiles per second
   const HEAD_SPEED = 3.6, HEAD_SPEED_MAX = 5.4; // heads speed up as fewer are left
-  const LIVES = 3, HEAD_COUNT = 8;
-  const BANANAS_MAX = 5, PEELS_MAX = 16;
+  const LIVES = 3, HEAD_COUNT = 3;
+  const BANANAS_MAX = 10, PEELS_MAX = 16;
   const BUTTON_WAIT = 12;              // seconds of leaving the final button alone to truly win
 
   const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up, right, down, left
@@ -100,7 +100,7 @@
     heads = []; bananas = []; peels = []; fx = []; texts = [];
     toSpawn = HEAD_COUNT; spawnTimer = 1.2; bananaTimer = 0; shake = 0; flash = 0; button = null; tempt = 0;
     phase = 'intro'; phaseT = 0;
-    for (let i = 0; i < 4; i++) spawnBanana();
+    for (let i = 0; i < 8; i++) spawnBanana();
     computeDist();
     last = performance.now();
     raf = requestAnimationFrame(frame);
@@ -290,7 +290,7 @@
       if (phase === 'play') updatePlayer(dt);
       if (phase === 'play' && toSpawn > 0 && (spawnTimer -= dt) <= 0) { spawnHead(); toSpawn--; spawnTimer = 1.0; }
       if (phase === 'play') updateHeads(dt);
-      if ((bananaTimer -= dt) <= 0) { if (bananas.length < BANANAS_MAX) spawnBanana(); bananaTimer = 1.6; }
+      if ((bananaTimer -= dt) <= 0) { if (bananas.length < BANANAS_MAX) spawnBanana(); bananaTimer = 0.9; }
       if (phase === 'play' && toSpawn === 0 && heads.length === 0) { phase = 'cleared'; phaseT = 0; beep(523, 0.1, 'triangle', 0.06); setTimeout(() => beep(784, 0.2, 'triangle', 0.06), 120); }
     }
     if (phase === 'cleared' && phaseT > 2.2) { phase = 'button'; phaseT = 0; button = { t: 0 }; thud(0.7); }
