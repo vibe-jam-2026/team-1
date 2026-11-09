@@ -110,14 +110,29 @@
   }
 
   function finish() {
-    if (ended || phaseT < 1.2) return;
+    const lose = phase === 'lose';
+    if (ended || phaseT < (lose ? 0.6 : 1.2)) return;
     ended = true;
-    cancelAnimationFrame(raf); clearInterval(beatTimer);
+    clearInterval(beatTimer);
     removeEventListener('keydown', onKey, true);
     removeEventListener('keyup', onKey, true);
     removeEventListener('resize', resize);
-    root.remove();
-    onDone && onDone(phase === 'win' ? 'win' : 'lose');
+    const close = () => { cancelAnimationFrame(raf); root.remove(); };
+    onDone && onDone(lose ? 'lose' : 'win');
+    if (!lose || !root.animate) return close();
+    // Lost: the boss stage closes in a shrinking circle around the fallen snake,
+    // revealing the snake game underneath, which is already waiting.
+    const r = cv.getBoundingClientRect(), sc = r.width / W;
+    const cx = r.left + (P.x - cam.x) * sc, cy = r.top + (P.y - 20) * sc;
+    root.style.background = 'transparent';
+    const anim = root.animate([
+      { clipPath: `circle(150vmax at ${cx}px ${cy}px)` },
+      { clipPath: `circle(70px at ${cx}px ${cy}px)`, offset: 0.55 },
+      { clipPath: `circle(70px at ${cx}px ${cy}px)`, offset: 0.7 },
+      { clipPath: `circle(0px at ${cx}px ${cy}px)` },
+    ], { duration: 1400, easing: 'ease-in-out', fill: 'forwards' });
+    anim.onfinish = close;
+    beep(500, 0.15, 'triangle', 0.05); setTimeout(() => beep(330, 0.2, 'triangle', 0.05), 150); setTimeout(() => beep(196, 0.4, 'triangle', 0.05), 320);
   }
 
   function resize() {
@@ -348,6 +363,7 @@
     const dt = Math.min(0.033, (now - last) / 1000); last = now;
     phaseT += dt;
     if (phase === 'intro' && phaseT > 2.4) { phase = 'fight'; phaseT = 0; }
+    if (phase === 'lose' && phaseT > 2) finish(); // no key needed: straight back to the snake
     if (phase === 'fight' || phase === 'win' || phase === 'lose') {
       updatePlayer(dt);
       if (phase !== 'lose') updateRick(dt); else R.t += dt;
@@ -374,8 +390,8 @@
     ctx.translate(-Math.round(cam.x) + sx, sy);
     drawStage();
     for (const b of bonuses) drawBonus(b);
-    if (rickSlam) drawButton(rickSlam.tx, rickSlam.ty, 62, rickSlam.t >= RICK_TL.slam, true, clamp01(rickSlam.t / 0.25));
-    if (P.slam) drawButton(P.slam.tx, P.slam.ty, P.slam.mega ? 34 : 22, P.slam.t >= PLAYER_TL.slam, false, clamp01(P.slam.t / 0.08));
+    if (rickSlam) drawMarker(rickSlam.tx, rickSlam.ty, 125, rickSlam.t, RICK_TL, '255,70,60');
+    if (P.slam) drawMarker(P.slam.tx, P.slam.ty, P.slam.mega ? 115 : 72, P.slam.t, PLAYER_TL, '120,255,140');
     drawRick();
     drawPlayer();
     for (const r of rockets) drawRocket(r);
@@ -453,20 +469,30 @@
     }
   }
 
-  // A red arcade button on the ground, seen from the side. pop: 0..1 grow-in.
-  function drawButton(x, y, r, pressed, sign, pop) {
-    ctx.save(); ctx.translate(x, y); ctx.scale(pop, pop);
-    ctx.fillStyle = 'rgba(255,60,50,.25)'; ctx.beginPath(); ctx.ellipse(0, -4, r * 1.6, r * 0.5, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#2b2f38'; ctx.beginPath(); ctx.roundRect(-r, -r * 0.4, r * 2, r * 0.4, r * 0.15); ctx.fill();
-    ctx.fillStyle = pressed ? '#a8201a' : '#ff3b30';
-    ctx.beginPath(); ctx.ellipse(0, -r * 0.4, r * 0.75, pressed ? r * 0.18 : r * 0.55, 0, Math.PI, 0); ctx.fill();
-    if (!pressed) { ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 0.7, r * 0.15, r * 0.09, -0.3, 0, 7); ctx.fill(); }
-    if (sign) {
-      const fs = 16; ctx.font = `800 ${fs}px system-ui, sans-serif`;
-      const tw = ctx.measureText("DON'T PRESS").width + 16;
-      ctx.fillStyle = 'rgba(15,17,22,.9)'; ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.roundRect(-tw / 2, 10, tw, 26, 8); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText("DON'T PRESS", 0, 24);
+  // A target marker on the floor showing where a hand is about to land (radius = how far the hit reaches).
+  // It pulses faster as the slam gets closer, and fades out after the impact.
+  function drawMarker(x, y, radius, t, tl, rgb) {
+    const pop = ease(clamp01(t / 0.15));
+    const fade = t < tl.slam ? 1 : 1 - clamp01((t - tl.slam) / 0.3);
+    if (fade <= 0) return;
+    const k = clamp01(t / tl.slam), pulse = 0.5 + 0.5 * Math.sin(t * (8 + k * 30));
+    const rx = radius * pop, ry = radius * 0.16 * pop;
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = `rgba(${rgb},${0.12 + k * 0.18})`;
+    ctx.beginPath(); ctx.ellipse(x, y + 2, rx, ry, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = `rgba(${rgb},${0.6 + pulse * 0.4})`; ctx.lineWidth = 3;
+    ctx.setLineDash([14, 9]); ctx.lineDashOffset = -t * 60;
+    ctx.beginPath(); ctx.ellipse(x, y + 2, rx, ry, 0, 0, 7); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.ellipse(x, y + 2, rx * 0.35, ry * 0.35, 0, 0, 7); ctx.stroke();
+    ctx.beginPath(); // crosshair
+    ctx.moveTo(x - rx * 0.6, y + 2); ctx.lineTo(x - rx * 0.15, y + 2); ctx.moveTo(x + rx * 0.15, y + 2); ctx.lineTo(x + rx * 0.6, y + 2);
+    ctx.stroke();
+    if (t < tl.slam) { // bobbing arrow above the spot
+      const ay = y - 34 - Math.abs(Math.sin(t * 7)) * 10, s = radius > 100 ? 14 : 10;
+      ctx.fillStyle = `rgba(${rgb},${0.7 + pulse * 0.3})`;
+      ctx.beginPath(); ctx.moveTo(x - s, ay - s); ctx.lineTo(x + s, ay - s); ctx.lineTo(x, ay); ctx.closePath(); ctx.fill();
     }
     ctx.restore();
   }
@@ -530,7 +556,6 @@
       const k = clamp01(s.t / RICK_TL.slam);
       ctx.fillStyle = `rgba(0,0,0,${0.2 + k * 0.35})`;
       ctx.beginPath(); ctx.ellipse(s.tx, s.ty + 4, 125 * (0.5 + k * 0.5), 18, 0, 0, 7); ctx.fill();
-      if (Math.floor(s.t * 8) % 2) { ctx.strokeStyle = 'rgba(255,60,50,.8)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(s.tx, s.ty + 4, 125, 20, 0, 0, 7); ctx.stroke(); }
     }
     drawArmAndHand(ox, oy, pose, 170, '#2b2b33', '#121217', '#f2c7a0', '#a0704f', Math.sign(s.tx - R.x) || 1, 30, 0.25);
     const ti = s.t - RICK_TL.slam;
@@ -740,7 +765,7 @@
       ctx.fillText(win ? 'RICK DEFEATED!' : 'YOU GOT SLAMMED', W / 2, H * 0.38);
       ctx.fillStyle = '#fff'; ctx.font = '700 22px system-ui, sans-serif';
       ctx.fillText(win ? 'He gave you up. +25 points' : 'Rick wins. Back to the snake.', W / 2, H * 0.38 + 46);
-      if (phaseT > 1.2) { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '16px system-ui, sans-serif'; ctx.fillText('Press any key or tap to continue', W / 2, H * 0.38 + 86); }
+      if (win && phaseT > 1.2) { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '16px system-ui, sans-serif'; ctx.fillText('Press any key or tap to continue', W / 2, H * 0.38 + 86); }
     }
   }
 
