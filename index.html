@@ -114,7 +114,10 @@
   const RB_REACH = 3;        // how close the head must get before the arm presses it
   const RB_LIFE = 14;          // seconds before an unpressed red button fades away
   // The red (rickroll) and blue (boss fight) buttons spawn independently: at most one of each at a time.
-  const BTN_EVERY = { red: () => 4 + Math.random() * 4, blue: () => 6 + Math.random() * 6 }; // seconds until the next one
+  // Seconds from one button's appearance to the next of the same colour (a button lasts at most RB_LIFE seconds,
+  // so a new one of each colour always appears within 20 seconds, also while the rickroll plays).
+  const BTN_EVERY = { red: () => 6 + Math.random() * 6, blue: () => 8 + Math.random() * 6 };
+  const BTN_MAX_GAP = 20;
   // Arm timeline (seconds into the 'arm' state): reach out, wind up high, SLAM, then let the impact ring out.
   const T_REACH = 0.45, T_WIND = 0.75, T_SLAM = 0.83, ARM_TIME = 1.5;
   const RICK_TIME = 0.6;       // short pause while the video starts, then play resumes on top of it
@@ -424,11 +427,12 @@
   function updateButtons(dt) {
     const h = snake[0], hx = h.x + 0.5, hy = h.y + 0.5;
     for (const kind of ['red', 'blue']) {
+      btnTimer[kind] -= dt; // counts from the last one's appearance, also while it's still on the board
       const b = buttons[kind];
       if (!b) {
-        if (kind === 'red' && rolling) continue; // no new red button while the video plays
-        if ((btnTimer[kind] -= dt) <= 0) {
+        if (btnTimer[kind] <= 0) {
           buttons[kind] = { x: 1 + Math.random() * (COLS - 2), y: -0.5, life: RB_LIFE, blue: kind === 'blue' };
+          btnTimer[kind] = Math.min(BTN_MAX_GAP, BTN_EVERY[kind]());
           sfx(kind === 'blue' ? 'dingBlue' : 'ding');
         }
         continue;
@@ -437,7 +441,7 @@
       if (d < RB_REACH) { rb = b; state = 'arm'; armT = 0; sfx('whoosh'); setTimeout(() => sfx('swoosh'), 650); return; }
       b.x += dx / d * RB_SPEED * dt; b.y += dy / d * RB_SPEED * dt;
       b.life -= dt;
-      if (b.life <= 0) { buttons[kind] = null; btnTimer[kind] = BTN_EVERY[kind](); }
+      if (b.life <= 0) buttons[kind] = null;
     }
   }
 
@@ -489,7 +493,7 @@
       if (armT >= ARM_TIME) {
         const blue = rb.blue;
         const kind = blue ? 'blue' : 'red';
-        buttons[kind] = null; btnTimer[kind] = BTN_EVERY[kind]();
+        buttons[kind] = null;
         rb = null; sparks = []; cv.style.transform = '';
         if (blue) startBoss();
         else { state = 'rick'; rickT = 0; startRoll(); }
