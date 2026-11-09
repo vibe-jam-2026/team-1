@@ -135,6 +135,10 @@
 
   let snake, dir, turns, grow, obstacles, score, state, moveAcc, spawnAcc, elapsed;
   let forbidden = -1, swapTimer = 0; // forbidden: the red key right now (-1 = none)
+  // Each time a key turns red it gets ONE punishment, picked at random (never the same as last time):
+  // 0 = grow, 1 = speed up, 2 = slow down. The red button shows which one.
+  let effect = 0;
+  const EFFECT_LABEL = [`+${GROW_PENALTY}`, 'FAST', 'SLOW'];
   let hitTimer = 0, penaltyFlash = 0, hitMsg = '';
   let items = [], puTimer = 0, shieldT = 0, turboT = 0, slowT = 0, bombFlash = 0;
   let fx = [], debris = [], popups = [], snip = null; // particles, cut-off tail pieces, floating texts, scissors animation
@@ -143,6 +147,7 @@
   function toggleForbidden() {
     if (forbidden >= 0) { forbidden = -1; swapTimer = SAFE_TIME(); return; }
     do forbidden = Math.floor(Math.random() * 4); while (forbidden === offKey);
+    effect = (effect + 1 + Math.floor(Math.random() * 2)) % 3; // a different effect than last time
     swapTimer = FORBID_TIME();
     beep(880, 0.12, 'triangle', 0.08);
   }
@@ -233,7 +238,7 @@
     if (k !== lastDir && k !== (lastDir + 2) % 4 && turns.length < 2) turns.push(k);
   }
   function punish() {
-    const h = snake[0], x = h.x + 0.5, y = h.y + 0.5, roll = Math.floor(Math.random() * 3);
+    const h = snake[0], x = h.x + 0.5, y = h.y + 0.5, roll = effect;
     penaltyFlash = 0.35;
     if (roll === 0) {
       grow += GROW_PENALTY;
@@ -864,7 +869,7 @@
       const k = +b.dataset.k;
       b.classList.toggle('forbidden', k === forbidden);
       b.classList.toggle('off', k === offKey);
-      b.querySelector('small').textContent = k === offKey ? 'OFF' : k === forbidden ? 'DON\'T' : '↑→↓←'[k];
+      b.querySelector('small').textContent = k === offKey ? 'OFF' : k === forbidden ? EFFECT_LABEL[effect] : '↑→↓←'[k];
     }
   }
 
