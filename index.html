@@ -89,9 +89,10 @@
     <div><i style="background:#c9a7ff"></i><b>Scissors</b> cut the snake in half</div>
     <div class="trap">…unless it's a trap</div>
   </div>
-  <div class="help">W A S D or arrow keys to steer<br>P to pause · <a href="instructions.html">instructions</a></div>
+  <div class="help">W A S D or arrow keys to steer<br>P to pause · <span id="mute">M to mute</span> · <a href="instructions.html">instructions</a></div>
   </div>
 </div>
+<script src="sfx.js"></script>
 <script src="boss.js"></script>
 <script src="maze.js"></script>
 <script>
@@ -133,6 +134,8 @@
   const $ = id => document.getElementById(id);
   const scoreEl = $('score'), bestEl = $('best'), lenEl = $('len');
   const btns = [...document.querySelectorAll('.controls button')];
+  const muteEl = $('mute');
+  try { if (localStorage.getItem('snakeMuted') === '1') muteEl.textContent = 'M to unmute'; } catch (e) {}
 
   let best = 0;
   try { best = +localStorage.getItem('snakeDodgeBest') || 0; } catch (e) {}
@@ -154,11 +157,12 @@
     do forbidden = Math.floor(Math.random() * 4); while (forbidden === offKey);
     effect = (effect + 1 + Math.floor(Math.random() * 2)) % 3; // a different effect than last time
     swapTimer = FORBID_TIME();
-    beep(880, 0.12, 'triangle', 0.08);
+    sfx('alarm');
   }
 
   function reset() {
     const y = Math.floor(ROWS * 0.65), x = Math.floor(COLS / 2) - 1;
+    bestAtStart = best; cheered = false;
     snake = [];
     for (let i = 0; i < START_LEN; i++) snake.push({ x: x - i + 1, y });
     dir = 1; turns = []; grow = 0; obstacles = [];
@@ -184,7 +188,7 @@
 
   function playFromStart() {
     try {
-      player.seekTo(0, true); player.unMute(); player.setVolume(80); player.playVideo();
+      player.seekTo(0, true); player.unMute(); player.setVolume(80); if (SFX.muted) player.mute(); player.playVideo();
       // if the browser refuses to start it with sound, play it muted
       setTimeout(() => {
         if (rolling && ![1, 3].includes(player.getPlayerState())) { player.mute(); player.playVideo(); }
@@ -232,49 +236,25 @@
     } catch (e) {}
   }
 
-  // ---- Sound ----
-  let actx = null;
-  function beep(freq, dur = 0.08, type = 'square', vol = 0.06) {
-    try {
-      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-      const o = actx.createOscillator(), g = actx.createGain();
-      o.type = type; o.frequency.value = freq;
-      g.gain.setValueAtTime(vol, actx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
-      o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
-    } catch (e) {}
-  }
-
-  // A heavy slam: a low pitch drop plus a burst of noise.
-  function thud() {
-    try {
-      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-      const t = actx.currentTime;
-      const o = actx.createOscillator(), g = actx.createGain();
-      o.type = 'sine'; o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(30, t + 0.35);
-      g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
-      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.45);
-      const len = Math.floor(actx.sampleRate * 0.25), buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
-      const n = actx.createBufferSource(), f = actx.createBiquadFilter(), ng = actx.createGain();
-      n.buffer = buf; f.type = 'lowpass'; f.frequency.value = 1400; ng.gain.value = 0.5;
-      n.connect(f).connect(ng).connect(actx.destination); n.start(t);
-    } catch (e) {}
-  }
+  // ---- Sound (sfx.js) ----
+  const sfx = name => SFX.play(name);
+  const beep = (...a) => SFX.beep(...a);
+  const thud = () => SFX.thud(1);
+  let bestAtStart = 0, cheered = false; // for the new-best jingle
 
   // ---- Input ----
   function press(k) {
-    if (state === 'ready' || state === 'paused') { state = 'playing'; return; }
+    if (state === 'ready' || state === 'paused') { if (state === 'ready') sfx('start'); state = 'playing'; return; }
     if (state !== 'playing') return;
     if (k === offKey) { // switched off: nothing happens, just a dead clunk
-      beep(70, 0.07, 'square', 0.05);
+      sfx('clunk');
       const b = btns.find(b => +b.dataset.k === k);
       b.classList.remove('jolt'); void b.offsetWidth; b.classList.add('jolt');
       return;
     }
     if (k === forbidden) {
       punish(); // it still steers, but you pay for it
-    } else beep(520, 0.03, 'square', 0.03);
+    } else sfx('steer');
     const lastDir = turns.length ? turns[turns.length - 1] : dir;
     if (k !== lastDir && k !== (lastDir + 2) % 4 && turns.length < 2) turns.push(k);
   }
@@ -283,15 +263,15 @@
     penaltyFlash = 0.35;
     if (roll === 0) {
       grow += GROW_PENALTY;
-      beep(140, 0.18, 'sawtooth', 0.08);
+      sfx('grow'); sfx('buzzer');
       popup(x, y, `+${GROW_PENALTY} LENGTH`, '#ff5a4e');
     } else if (roll === 1) {
       turboT = FAST_TIME; slowT = 0;
-      beep(300, 0.08, 'sawtooth', 0.07); setTimeout(() => beep(700, 0.12, 'sawtooth', 0.07), 70);
+      sfx('turbo');
       popup(x, y, 'SPEED UP!', '#ff9f43');
     } else {
       slowT = SLOW_TIME; turboT = 0;
-      beep(400, 0.12, 'sawtooth', 0.07); setTimeout(() => beep(150, 0.25, 'sawtooth', 0.07), 100);
+      sfx('slowmo');
       popup(x, y, 'SLOW DOWN!', '#7aa2ff');
     }
   }
@@ -300,8 +280,12 @@
     if (e.repeat) return;
     const k = e.key.toLowerCase();
     if (k in KEYMAP) { press(KEYMAP[k]); e.preventDefault(); }
+    else if (k === 'm') {
+      SFX.toggleMute(); muteEl.textContent = SFX.muted ? 'M to unmute' : 'M to mute';
+      try { if (player && playerReady) SFX.muted ? player.mute() : player.unMute(); } catch (e) {}
+    }
     else if (k === 'p' || k === 'escape') { if (state === 'playing') state = 'paused'; else if (state === 'paused') state = 'playing'; }
-    else if ((k === ' ' || k === 'enter') && (state === 'ready' || state === 'paused')) { state = 'playing'; e.preventDefault(); }
+    else if ((k === ' ' || k === 'enter') && (state === 'ready' || state === 'paused')) { if (state === 'ready') sfx('start'); state = 'playing'; e.preventDefault(); }
   });
   for (const b of btns) b.addEventListener('pointerdown', e => { e.preventDefault(); press(+b.dataset.k); });
   cv.addEventListener('pointerdown', e => {
@@ -317,7 +301,8 @@
   function hit(msg) {
     stopRoll(); // getting hit ends the rickroll
     hitMsg = msg; state = 'hit'; hitTimer = HIT_PAUSE;
-    beep(90, 0.4, 'sawtooth', 0.1);
+    sfx(msg === 'Hit the wall' ? 'crunch' : msg === 'Bit yourself' ? 'oof' : 'hit');
+    setTimeout(() => sfx('powerdown'), 250);
   }
 
   function step() {
@@ -352,6 +337,7 @@
       if (Math.abs(x - h.x) + Math.abs(y - h.y) < 4) continue;
       if (snake.some(s => s.x === x && s.y === y) || items.some(i => i.x === x && i.y === y)) continue;
       items.push({ type: types[Math.floor(Math.random() * 3)], x, y, life: PU_LIFE, t: Math.random() * 6, trap: Math.random() < TRAP_CHANCE });
+      sfx('sparkle');
       return;
     }
   }
@@ -363,24 +349,24 @@
     if (it.type === 'bomb') {
       if (!it.trap) {
         for (const o of obstacles) burst(o.x + o.w / 2, o.y + 0.5, 6 + o.w * 4, ['#ffb838', '#ff5a1f', '#fff', '#555'], 10);
-        obstacles = []; bombFlash = 0.3; thud();
+        obstacles = []; bombFlash = 0.3; sfx('boom');
         popup(x, y, 'BOOM!', '#ffb838');
       } else { // dud: it calls in an obstacle rain instead
         for (let i = 0; i < 9; i++) {
           const w = 1 + Math.floor(Math.random() * 3);
           obstacles.push({ x: Math.floor(Math.random() * (COLS - w + 1)), y: -1 - Math.random() * 4, w, v: 4 + Math.random() * 3 });
         }
-        beep(110, 0.35, 'sawtooth', 0.08);
+        sfx('whistle'); setTimeout(() => sfx('alarm'), 500);
         popup(x, y, 'DUD! INCOMING!', '#ff5a4e');
       }
     } else if (it.type === 'shield') {
       if (!it.trap) {
         shieldT = SHIELD_TIME; turboT = 0;
-        beep(660, 0.08, 'triangle', 0.08); setTimeout(() => beep(990, 0.12, 'triangle', 0.08), 80);
+        sfx('shieldUp');
         popup(x, y, 'SHIELD!', '#46d4ff');
       } else { // fake shield: the snake goes into turbo
         turboT = TURBO_TIME; slowT = 0;
-        beep(300, 0.1, 'sawtooth', 0.07); setTimeout(() => beep(600, 0.15, 'sawtooth', 0.07), 90);
+        sfx('turbo'); sfx('laugh');
         popup(x, y, 'TRAP! TURBO!', '#ff5a4e');
       }
     } else if (it.type === 'scissors') {
@@ -394,11 +380,11 @@
           for (const sgm of snake.splice(keep)) debris.push({ x: sgm.x + 0.5, y: sgm.y + 0.5, vx: (Math.random() - 0.5) * 3,
             vy: (Math.random() - 0.5) * 3, rot: 0, vr: (Math.random() - 0.5) * 10, life: 1.2, delay: 0.25 });
         }
-        beep(1800, 0.04, 'square', 0.05); setTimeout(() => beep(2200, 0.04, 'square', 0.05), 120);
+        sfx('snip'); setTimeout(() => sfx('splat'), 250);
         popup(x, y, 'SNIP!', '#c9a7ff');
       } else { // glued: the snake grows instead
         grow += TRAP_GROW; penaltyFlash = 0.5;
-        beep(140, 0.25, 'sawtooth', 0.08);
+        sfx('grow'); sfx('laugh');
         popup(x, y, `OOPS! GLUED +${TRAP_GROW}`, '#ff5a4e');
       }
     }
@@ -441,11 +427,14 @@
       const b = buttons[kind];
       if (!b) {
         if (kind === 'red' && rolling) continue; // no new red button while the video plays
-        if ((btnTimer[kind] -= dt) <= 0) buttons[kind] = { x: 1 + Math.random() * (COLS - 2), y: -0.5, life: RB_LIFE, blue: kind === 'blue' };
+        if ((btnTimer[kind] -= dt) <= 0) {
+          buttons[kind] = { x: 1 + Math.random() * (COLS - 2), y: -0.5, life: RB_LIFE, blue: kind === 'blue' };
+          sfx(kind === 'blue' ? 'dingBlue' : 'ding');
+        }
         continue;
       }
       const dx = hx - b.x, dy = hy - b.y, d = Math.hypot(dx, dy);
-      if (d < RB_REACH) { rb = b; state = 'arm'; armT = 0; beep(300, 0.1, 'triangle', 0.08); return; }
+      if (d < RB_REACH) { rb = b; state = 'arm'; armT = 0; sfx('whoosh'); setTimeout(() => sfx('swoosh'), 650); return; }
       b.x += dx / d * RB_SPEED * dt; b.y += dy / d * RB_SPEED * dt;
       b.life -= dt;
       if (b.life <= 0) { buttons[kind] = null; btnTimer[kind] = BTN_EVERY[kind](); }
@@ -456,9 +445,11 @@
   function startBoss() {
     state = 'boss';
     stopRoll();
+    sfx('sting');
     BossFight.start(result => {
       obstacles = []; items = []; turns = [];
       if (result === 'win') {
+        setTimeout(() => sfx('fanfare'), 300);
         score += BOSS_WIN_POINTS;
         if (score > best) { best = score; try { localStorage.setItem('snakeDodgeBest', best); } catch (e) {} }
         popup(snake[0].x + 0.5, snake[0].y + 0.5, `TRUE VICTORY +${BOSS_WIN_POINTS}`, '#5ee07a');
@@ -472,8 +463,7 @@
   }
 
   function impact() {
-    thud();
-    beep(1400, 0.05, 'square', 0.05);
+    sfx('slam');
     sparks = [];
     for (let i = 0; i < 26; i++) {
       const a = Math.random() * Math.PI * 2, v = 6 + Math.random() * 12;
@@ -524,7 +514,10 @@
     }
     if (swapTimer <= 0) toggleForbidden();
 
-    if (shieldT > 0) shieldT -= dt;
+    if (shieldT > 0) {
+      const before = shieldT; shieldT -= dt;
+      if ([1.2, 0.8, 0.4].some(m => before > m && shieldT <= m)) sfx('shieldLow'); // running out
+    }
     if (turboT > 0) turboT -= dt;
     if (slowT > 0) slowT -= dt;
     for (const it of items) { it.life -= dt; it.t += dt; }
@@ -547,7 +540,7 @@
       if (shieldT <= 0) return hit('Hit by an obstacle');
       o.dead = true; // it shatters on the shield
       burst(o.x + o.w / 2, o.y + 0.5, 8 + o.w * 3, ['#ffb838', '#46d4ff', '#fff'], 9);
-      beep(900, 0.05, 'square', 0.04);
+      sfx('glass');
     }
     obstacles = obstacles.filter(o => !o.dead);
     const before = obstacles.length;
@@ -555,7 +548,11 @@
     const dodged = before - obstacles.length;
     if (dodged) {
       score += dodged;
-      if (score > best) { best = score; try { localStorage.setItem('snakeDodgeBest', best); } catch (e) {} }
+      sfx('score');
+      if (score > best) {
+        if (!cheered && bestAtStart > 0) { cheered = true; sfx('newBest'); popup(snake[0].x + 0.5, snake[0].y + 0.5, 'NEW BEST!', '#ffd23f'); }
+        best = score; try { localStorage.setItem('snakeDodgeBest', best); } catch (e) {}
+      }
     }
   }
 
