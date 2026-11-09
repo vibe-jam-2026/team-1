@@ -22,7 +22,14 @@
   body.rolling .bgvid { opacity: 1; visibility: visible; }
   body.rolling .hud, body.rolling .help { text-shadow: 0 1px 4px #000, 0 0 2px #000; }
   body.rolling .hud .k, body.rolling .help, body.rolling a { color: #e9ecf1; }
-  .app { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; align-items: center; padding: 12px 16px; gap: 10px; }
+  .app { position: relative; z-index: 1; height: 100%; display: flex; align-items: center; justify-content: center; padding: 12px 16px; gap: 24px; }
+  .side { width: 232px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+  .help { text-align: center; }
+  @media (max-width: 760px) {
+    .app { flex-direction: column; justify-content: flex-start; gap: 10px; }
+    .side { display: contents; }
+    .hud { order: -1; }
+  }
   .hud { display: flex; gap: 22px; align-items: baseline; font-variant-numeric: tabular-nums; }
   .hud .k { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--mut); }
   .hud b { font-size: 24px; display: block; }
@@ -51,29 +58,31 @@
     src="https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1&controls=0&disablekb=1&loop=1&playlist=dQw4w9WgXcQ&modestbranding=1&playsinline=1&rel=0&iv_load_policy=3"></iframe>
 </div>
 <div class="app">
+  <canvas id="c"></canvas>
+  <div class="side">
   <div class="hud">
     <div><span class="k">Score</span><b id="score">0</b></div>
     <div><span class="k">Best</span><b id="best">0</b></div>
     <div><span class="k">Length</span><b id="len">0</b></div>
   </div>
-  <canvas id="c"></canvas>
   <div class="controls">
     <button data-k="0" aria-label="Up">W<small>↑</small></button>
     <button data-k="3" aria-label="Left">A<small>←</small></button>
     <button data-k="2" aria-label="Down">S<small>↓</small></button>
     <button data-k="1" aria-label="Right">D<small>→</small></button>
   </div>
-  <div class="help">W A S D or arrow keys to steer · P to pause · <a href="instructions.html">instructions</a></div>
+  <div class="help">W A S D or arrow keys to steer<br>P to pause · <a href="instructions.html">instructions</a></div>
+  </div>
 </div>
 <script>
 (() => {
   // ---- Tunables (we will iterate on these) ----
-  const COLS = 19, ROWS = 23;
+  const COLS = 36, ROWS = 24;
   const START_LEN = 4;
   const GROW_PENALTY = 3;      // segments added when pressing the forbidden side
   const MOVE_TIME = 0.14;      // seconds per snake step
-  const SWAP_MIN = 10, SWAP_MAX = 22; // seconds before the forbidden key changes (random in range)
-  const SWAP_WARN = 2;         // seconds of warning before it changes
+  const SWAP_MIN = 4, SWAP_MAX = 8;   // seconds before the forbidden key changes (random in range)
+  const SWAP_WARN = 1.5;       // seconds of warning before it changes
   const RB_SPEED = 1.6;        // red button speed, cells/second (it homes in on the head)
   const RB_REACH = 3;        // how close the head must get before the arm presses it
   const RB_LIFE = 14;          // seconds before an unpressed red button fades away
@@ -177,10 +186,8 @@
     if (state !== 'playing') return;
     if (k === forbidden) {
       grow += GROW_PENALTY; penaltyFlash = 0.35;
-      beep(140, 0.18, 'sawtooth', 0.08);
-      return; // the forbidden key only punishes, it does not steer
-    }
-    beep(520, 0.03, 'square', 0.03);
+      beep(140, 0.18, 'sawtooth', 0.08); // it still steers, but you pay for it
+    } else beep(520, 0.03, 'square', 0.03);
     const lastDir = turns.length ? turns[turns.length - 1] : dir;
     if (k !== lastDir && k !== (lastDir + 2) % 4 && turns.length < 2) turns.push(k);
   }
@@ -211,8 +218,8 @@
 
   function step() {
     if (turns.length) dir = turns.shift();
-    // no walls: leaving one side brings you back on the opposite side
-    const h = snake[0], nx = (h.x + DIRS[dir][0] + COLS) % COLS, ny = (h.y + DIRS[dir][1] + ROWS) % ROWS;
+    const h = snake[0], nx = h.x + DIRS[dir][0], ny = h.y + DIRS[dir][1];
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return hit('Hit the wall');
     const body = grow > 0 ? snake : snake.slice(0, -1);
     if (body.some(s => s.x === nx && s.y === ny)) return hit('Bit yourself');
     snake.unshift({ x: nx, y: ny });
@@ -294,7 +301,7 @@
     if (state !== 'playing') return;
 
     spawnAcc -= dt;
-    if (spawnAcc <= 0) { spawn(); spawnAcc = 1.1 - difficulty() * 0.75 + Math.random() * 0.3; }
+    if (spawnAcc <= 0) { spawn(); spawnAcc = (1.1 - difficulty() * 0.75 + Math.random() * 0.3) * 19 / COLS; }
 
     updateRedButton(dt);
     if (state !== 'playing') return;
@@ -313,7 +320,8 @@
   // ---- Rendering ----
   let cell = 20, pad = 6;
   function resize() {
-    const availW = innerWidth - 24, availH = innerHeight - 220;
+    const stacked = innerWidth <= 760; // narrow screens put the controls under the board
+    const availW = stacked ? innerWidth - 24 : innerWidth - 232 - 24 - 40, availH = stacked ? innerHeight - 220 : innerHeight - 24;
     cell = Math.max(10, Math.floor(Math.min(availW / COLS, availH / ROWS)));
     const w = COLS * cell + pad * 2, h = ROWS * cell + pad * 2, dpr = devicePixelRatio || 1;
     cv.width = w * dpr; cv.height = h * dpr;
