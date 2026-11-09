@@ -39,29 +39,13 @@
   const wall = (x, y) => x < 0 || y < 0 || x >= COLS || y >= ROWS || MAP[y][x] === '#';
   const find = ch => { const out = []; MAP.forEach((row, y) => [...row].forEach((c, x) => { if (c === ch) out.push({ x, y }); })); return out; };
 
-  let root, cv, ctx, raf, last, done, ended, actx;
+  let root, cv, ctx, raf, last, done, ended, beatAt;
   let T, ox, oy;                       // tile size and maze offset on screen
   let P, heads, bananas, peels, fx, texts, phase, phaseT, bananaTimer, toSpawn, spawnTimer, dist, shake, flash, button, tempt;
 
-  // ---- Sound ----
-  function beep(freq, dur = 0.08, type = 'square', vol = 0.05) {
-    try {
-      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-      const o = actx.createOscillator(), g = actx.createGain();
-      o.type = type; o.frequency.value = freq;
-      g.gain.setValueAtTime(vol, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
-      o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
-    } catch (e) {}
-  }
-  function thud(v = 0.5) {
-    try {
-      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-      const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
-      o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(30, t + 0.4);
-      g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
-      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.45);
-    } catch (e) {}
-  }
+  // ---- Sound (sfx.js) ----
+  const sfx = name => window.SFX && SFX.play(name);
+  const thud = (v = 0.5) => window.SFX && SFX.thud(v);
 
   // ---- Setup / teardown ----
   function start(onDone) {
@@ -99,7 +83,8 @@
     P = { x: s.x, y: s.y, dir: 3, want: 3, moving: false, prog: 0, hp: LIVES, inv: 0, peels: 0, trail: [], t: 0 };
     heads = []; bananas = []; peels = []; fx = []; texts = [];
     toSpawn = HEAD_COUNT; spawnTimer = 1.2; bananaTimer = 0; shake = 0; flash = 0; button = null; tempt = 0;
-    phase = 'intro'; phaseT = 0;
+    phase = 'intro'; phaseT = 0; beatAt = 0;
+    sfx('sting'); setTimeout(() => { if (!ended && phase !== 'lose') SFX.music('maze'); }, 1500);
     for (let i = 0; i < 8; i++) spawnBanana();
     computeDist();
     last = performance.now();
@@ -111,6 +96,8 @@
     ended = true;
     removeEventListener('keydown', onKey, true);
     removeEventListener('resize', resize);
+    SFX.music(null);
+    if (result === 'lose') sfx('jingleDown');
     const close = () => { cancelAnimationFrame(raf); root.remove(); };
     done && done(result);
     if (result !== 'lose' || !root.animate) return close();
@@ -141,6 +128,7 @@
     const k = e.key.toLowerCase();
     if (k in KEYMAP || k === ' ') e.preventDefault();
     if (e.repeat) return;        // a key still held from the maze is not a press
+    if (k === 'm') return SFX.toggleMute(); // muting is not pressing the button
     anyInput();
     if (k in KEYMAP) input(KEYMAP[k]);
   }
@@ -194,14 +182,14 @@
     if (b) {
       bananas = bananas.filter(o => o !== b);
       P.peels++;
-      beep(700, 0.05, 'triangle', 0.05); setTimeout(() => beep(1050, 0.07, 'triangle', 0.05), 50);
+      sfx('nom');
       popText(P.x + 0.5, P.y, 'NOM', '#ffe14d');
     }
     // drop a peel behind the snake for every banana eaten
     if (P.peels > 0 && !peels.some(p => p.x === prev.x && p.y === prev.y) && peels.length < PEELS_MAX) {
       peels.push({ x: prev.x, y: prev.y, rot: Math.random() * 6, t: 0 });
       P.peels--;
-      beep(300, 0.04, 'square', 0.03);
+      sfx('splat');
     }
   }
 
@@ -220,7 +208,7 @@
     heads.push({ x: pen.x, y: pen.y, dir: pick([1, 3]), prog: 0, hp: 2 + (Math.random() < 0.5 ? 1 : 0), stun: 0, rot: 0, hurt: 0,
       chase: heads.length % 3 === 2 ? 0.45 : 0.85, say: 0 });
     heads[heads.length - 1].max = heads[heads.length - 1].hp;
-    beep(260, 0.12, 'triangle', 0.04);
+    sfx('pop'); sfx('roll');
   }
 
   function updateHeads(dt) {
@@ -237,10 +225,10 @@
         if (peel) {
           peels = peels.filter(p => p !== peel);
           h.hp--; h.stun = 1.1; h.hurt = 0.4; h.prog = 0;
-          beep(1200, 0.06, 'square', 0.05); setTimeout(() => beep(500, 0.15, 'square', 0.05), 60);
+          sfx('slip'); setTimeout(() => sfx(h.hp > 0 ? 'oof' : 'bigPop'), 350);
           burst(h.x + 0.5, h.y + 0.5, 10, ['#ffe14d', '#fff'], 5);
           popText(h.x + 0.5, h.y, h.hp > 0 ? 'SLIP!' : 'POP!', h.hp > 0 ? '#ffe14d' : '#fff');
-          if (h.hp <= 0) { h.dead = true; thud(0.4); shake = Math.max(shake, 6); burst(h.x + 0.5, h.y + 0.5, 30, ['#d9692b', '#f2c7a0', '#fff', '#ffe14d'], 7); }
+          if (h.hp <= 0) { h.dead = true; shake = Math.max(shake, 6); burst(h.x + 0.5, h.y + 0.5, 30, ['#d9692b', '#f2c7a0', '#fff', '#ffe14d'], 7); }
           break;
         }
         // pick the next direction: mostly toward the player, never straight back unless it's a dead end
@@ -258,10 +246,10 @@
       const q = pos(h);
       if (Math.hypot(p.x - q.x, p.y - q.y) < 0.65 && P.inv <= 0) {
         P.hp--; P.inv = 2; shake = 12; flash = 0.3;
-        thud(0.6); beep(120, 0.3, 'sawtooth', 0.08);
+        sfx('hurt'); sfx('laugh');
         popText(p.x + 0.5, p.y, P.hp > 0 ? 'OUCH!' : 'ROLLED OVER!', '#ff5a4e');
         h.x += DIRS[h.dir][0]; h.y += DIRS[h.dir][1]; h.dir = (h.dir + 2) % 4; h.prog = 1 - h.prog; // bounce off
-        if (P.hp <= 0) { phase = 'lose'; phaseT = 0; }
+        if (P.hp <= 0) { phase = 'lose'; phaseT = 0; SFX.music(null); setTimeout(() => sfx('sadTrombone'), 300); }
       }
     }
   }
@@ -269,7 +257,7 @@
   // ---- The final button ----
   function pressButton() {
     phase = 'pressed'; phaseT = 0;
-    beep(300, 0.1, 'triangle', 0.06);
+    sfx('whoosh');
   }
 
   // ---- Effects ----
@@ -291,13 +279,15 @@
       if (phase === 'play' && toSpawn > 0 && (spawnTimer -= dt) <= 0) { spawnHead(); toSpawn--; spawnTimer = 1.0; }
       if (phase === 'play') updateHeads(dt);
       if ((bananaTimer -= dt) <= 0) { if (bananas.length < BANANAS_MAX) spawnBanana(); bananaTimer = 0.9; }
-      if (phase === 'play' && toSpawn === 0 && heads.length === 0) { phase = 'cleared'; phaseT = 0; beep(523, 0.1, 'triangle', 0.06); setTimeout(() => beep(784, 0.2, 'triangle', 0.06), 120); }
+      if (phase === 'play' && toSpawn === 0 && heads.length === 0) { phase = 'cleared'; phaseT = 0; SFX.music(null); sfx('fanfare'); }
     }
-    if (phase === 'cleared' && phaseT > 2.2) { phase = 'button'; phaseT = 0; button = { t: 0 }; thud(0.7); }
+    if (phase === 'cleared' && phaseT > 2.2) { phase = 'button'; phaseT = 0; button = { t: 0 }; sfx('rumble'); thud(0.7); }
     if (phase === 'button') {
       button.t += dt;
-      if ((tempt += dt) > 2.4) tempt = 0;
-      if (button.t > BUTTON_WAIT + 1.2) { phase = 'victory'; phaseT = 0; for (let i = 0; i < 6; i++) setTimeout(() => beep(400 + i * 120, 0.12, 'triangle', 0.05), i * 90); }
+      if ((tempt += dt) > 2.4) { tempt = 0; if (button.t > 1.2) sfx('talk'); } // the tempting lines change
+      // a heartbeat that speeds up the longer you resist
+      if (button.t > 1.2 && (beatAt -= dt) <= 0) { sfx('heartbeat'); beatAt = Math.max(0.45, 1.1 - (button.t - 1.2) * 0.05); }
+      if (button.t > BUTTON_WAIT + 1.2) { phase = 'victory'; phaseT = 0; sfx('fanfare'); setTimeout(() => sfx('sparkle'), 500); setTimeout(() => sfx('newBest'), 900); }
     }
     if (phase === 'pressed' && phaseT > 3.2) finish('pressed');
     if (phase === 'lose' && phaseT > 2) finish('lose');
@@ -437,7 +427,7 @@
     ctx.textAlign = 'right'; ctx.fillStyle = '#ffe14d';
     ctx.fillText(`PEELS READY: ${P.peels}`, W - 20, 26);
     ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('W A S D to move · every banana you eat drops a peel behind you', W / 2, H - 8);
+    ctx.fillText('W A S D to move · every banana you eat drops a peel behind you · M mute', W / 2, H - 8);
   }
 
   function drawCard(title, sub, color, a) {
@@ -491,7 +481,10 @@
     if (phase === 'pressed') { // the snake's hand can't resist
       const k = clamp01(phaseT / 0.45), y = -200 + k * k * (cy - R * 0.3 + 200);
       ctx.save(); ctx.translate(cx, y); ctx.scale(260, 200); ctx.rotate(Math.PI / 2); drawHand(phaseT > 0.45 ? 0.24 : 0.08); ctx.restore();
-      if (phaseT > 0.45 && !button.slammed) { button.slammed = true; thud(1); shake = 26; flash = 0.6; }
+      if (phaseT > 0.45 && !button.slammed) {
+        button.slammed = true; shake = 26; flash = 0.6;
+        sfx('slam'); sfx('buzzer'); setTimeout(() => sfx('sadTrombone'), 700);
+      }
       if (phaseT > 1.0) {
         ctx.fillStyle = `rgba(7,4,13,${0.7 * clamp01((phaseT - 1) / 0.4)})`; ctx.fillRect(0, 0, W, H);
         ctx.font = '900 56px system-ui, sans-serif'; ctx.fillStyle = '#ff3b30'; ctx.fillText('YOU PRESSED IT.', W / 2, H * 0.4);

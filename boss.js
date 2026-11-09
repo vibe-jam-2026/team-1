@@ -41,48 +41,15 @@
   const ease = t => 1 - Math.pow(1 - t, 3);
   const pick = a => a[Math.floor(Math.random() * a.length)];
 
-  let root, cv, ctx, raf, last, onDone, beatTimer, actx;
+  let root, cv, ctx, raf, last, onDone;
   let rhead, minis, handedOff; // the head-pop transition into the maze level
   let keys, P, R, cam, shake, bonuses, rockets, fx, texts, rickSlam, phase, phaseT, bonusTimer, flash, ended;
 
-  // ---- Sound ----
-  function audio() {
-    try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
-    return actx;
-  }
-  function beep(freq, dur = 0.08, type = 'square', vol = 0.05) {
-    const a = audio(); if (!a) return;
-    const o = a.createOscillator(), g = a.createGain();
-    o.type = type; o.frequency.value = freq;
-    g.gain.setValueAtTime(vol, a.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
-    o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime + dur);
-  }
-  function thud(big = 1) {
-    const a = audio(); if (!a) return;
-    const t = a.currentTime, o = a.createOscillator(), g = a.createGain();
-    o.type = 'sine'; o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(28, t + 0.4);
-    g.gain.setValueAtTime(0.45 * big, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
-    o.connect(g).connect(a.destination); o.start(t); o.stop(t + 0.5);
-    const len = Math.floor(a.sampleRate * 0.3), buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
-    const n = a.createBufferSource(), f = a.createBiquadFilter(), ng = a.createGain();
-    n.buffer = buf; f.type = 'lowpass'; f.frequency.value = 1200; ng.gain.value = 0.45 * big;
-    n.connect(f).connect(ng).connect(a.destination); n.start(t);
-  }
-  // a simple disco beat while the fight is on (kick on every beat, hi-hat in between)
-  function startBeat() {
-    let n = 0;
-    beatTimer = setInterval(() => {
-      const a = audio(); if (!a || phase === 'lose') return;
-      if (n % 2 === 0) {
-        const t = a.currentTime, o = a.createOscillator(), g = a.createGain();
-        o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.12);
-        g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-        o.connect(g).connect(a.destination); o.start(t); o.stop(t + 0.15);
-      } else beep(7000 + Math.random() * 1000, 0.03, 'square', 0.008);
-      n++;
-    }, 265);
-  }
+  // ---- Sound (sfx.js) ----
+  const sfx = name => window.SFX && SFX.play(name);
+  const beep = (...a) => window.SFX && SFX.beep(...a);
+  const thud = (v = 1) => window.SFX && SFX.thud(v);
+  const startBeat = () => window.SFX && SFX.music('boss');
 
   // ---- Setup / teardown ----
   function start(done) {
@@ -125,7 +92,7 @@
     bonuses = []; rockets = []; fx = []; texts = []; rickSlam = null;
     phase = 'intro'; phaseT = 0; bonusTimer = 3;
     rhead = null; minis = null; handedOff = false;
-    startBeat();
+    sfx('sting'); setTimeout(startBeat, 1800);
     last = performance.now();
     raf = requestAnimationFrame(frame);
   }
@@ -134,7 +101,7 @@
     const lose = phase === 'lose';
     if (ended || phaseT < (lose ? 0.6 : 1.2)) return;
     ended = true;
-    clearInterval(beatTimer);
+    SFX.music(null);
     removeEventListener('keydown', onKey, true);
     removeEventListener('keyup', onKey, true);
     removeEventListener('resize', resize);
@@ -153,7 +120,7 @@
       { clipPath: `circle(0px at ${cx}px ${cy}px)` },
     ], { duration: 1400, easing: 'ease-in-out', fill: 'forwards' });
     anim.onfinish = close;
-    beep(500, 0.15, 'triangle', 0.05); setTimeout(() => beep(330, 0.2, 'triangle', 0.05), 150); setTimeout(() => beep(196, 0.4, 'triangle', 0.05), 320);
+    sfx('jingleDown');
   }
 
   function resize() {
@@ -169,6 +136,7 @@
     const k = KEYMAP[e.key.toLowerCase()];
     // the boss fight owns the keyboard while it runs; the snake game underneath must not react
     e.stopImmediatePropagation();
+    if (e.type === 'keydown' && e.key.toLowerCase() === 'm' && !e.repeat) return SFX.toggleMute();
     if (e.type === 'keydown' && (phase === 'win' || phase === 'lose')) { e.preventDefault(); return finish(); }
     if (!k) return;
     e.preventDefault();
@@ -178,7 +146,7 @@
   function press(k, down) {
     if (down && (phase === 'win' || phase === 'lose')) return finish();
     keys[k] = down;
-    if (down && k === 'jump' && P.ground && phase === 'fight') { P.vy = -JUMP; P.ground = false; beep(520, 0.06, 'triangle', 0.04); }
+    if (down && k === 'jump' && P.ground && phase === 'fight') { P.vy = -JUMP; P.ground = false; sfx('jump'); }
     if (down && k === 'attack' && phase === 'fight') attack();
   }
 
@@ -190,7 +158,7 @@
     }
   }
   function popText(x, y, text, c, size = 26) { texts.push({ x, y, text, c, size, life: 1.2 }); }
-  function say(text) { R.say = text; R.sayT = 1.6; }
+  function say(text) { R.say = text; R.sayT = 1.6; if (window.SFX) SFX.play('talk', Math.min(10, 2 + Math.ceil(text.length / 4))); }
 
   // ---- Player ----
   function attack() {
@@ -198,14 +166,14 @@
     if (P.ammo > 0) { // rocket launcher
       P.ammo--; P.cd = 0.35;
       rockets.push({ x: P.x + P.face * 34, y: P.y - 34, vx: P.face * 820, t: 0 });
-      beep(180, 0.15, 'sawtooth', 0.06);
+      sfx('rocket');
       burst(P.x + P.face * 40, P.y - 34, 8, ['#fff', '#ccc', '#ffb838'], 120, 0.4);
       return;
     }
     const mega = P.mega > 0;
     if (mega) P.mega--;
     P.slam = { t: 0, tx: P.x + P.face * (mega ? 170 : 140), ty: P.y, mega, done: false };
-    beep(300, 0.08, 'triangle', 0.06);
+    sfx('whoosh');
   }
 
   function hurtPlayer(fromX) {
@@ -213,9 +181,9 @@
     P.hp--; P.inv = 1.4; P.slam = null;
     P.kb = Math.sign(P.x - fromX || 1) * 420; P.vy = -380; P.ground = false;
     shake = Math.max(shake, 16); flash = 0.25;
-    beep(110, 0.3, 'sawtooth', 0.09);
+    sfx('hurt');
     popText(P.x, P.y - 70, P.hp > 0 ? 'OUCH!' : 'SLAMMED!', '#ff5a4e', 30);
-    if (P.hp <= 0) { phase = 'lose'; phaseT = 0; }
+    if (P.hp <= 0) { phase = 'lose'; phaseT = 0; SFX.music(null); setTimeout(() => sfx('sadTrombone'), 400); }
   }
 
   function updatePlayer(dt) {
@@ -227,7 +195,7 @@
     if (control && input) P.face = input;
     P.vx = (control ? input * MOVE : 0) + P.kb;
     P.kb *= Math.pow(0.02, dt);
-    const prevY = P.y;
+    const prevY = P.y, wasGround = P.ground, fallV = P.vy;
     P.vy += GRAVITY * dt;
     P.x = clamp(P.x + P.vx * dt, 30, WW - 30);
     P.y += P.vy * dt;
@@ -236,6 +204,7 @@
       if (P.x > pl.x - 10 && P.x < pl.x + pl.w + 10 && prevY <= pl.y && P.y >= pl.y) { P.y = pl.y; P.vy = 0; P.ground = true; }
     }
     if (P.y >= GY) { P.y = GY; P.vy = 0; P.ground = true; }
+    if (P.ground && !wasGround && fallV > 300) sfx('land');
 
     // the slam
     const s = P.slam;
@@ -247,7 +216,7 @@
         thud(s.mega ? 0.8 : 0.45); shake = Math.max(shake, s.mega ? 12 : 6);
         burst(s.tx, s.ty - 10, s.mega ? 26 : 14, ['#fff', '#ffd23f', '#ff3b30'], s.mega ? 420 : 300);
         if (Math.abs(R.x - s.tx) < radius && s.ty > R.y - 200 && s.ty < R.y + 30) hitRick(s.mega ? MEGA_DMG : SLAM_DMG);
-        else popText(s.tx, s.ty - 60, 'MISS', '#9aa3b5', 20);
+        else { popText(s.tx, s.ty - 60, 'MISS', '#9aa3b5', 20); if (R.st !== 'leap') setTimeout(() => sfx('laugh'), 200); }
       }
       if (s.t >= PLAYER_TL.end) P.slam = null;
     }
@@ -259,14 +228,14 @@
     R.hp = Math.max(0, R.hp - dmg); R.hurtT = 0.35;
     popText(R.x, R.y - 220, `-${dmg}`, '#ffd23f', 34);
     burst(R.x, R.y - 120, 16, ['#ffd23f', '#fff', '#d9692b'], 350);
-    beep(880, 0.08, 'square', 0.06);
+    sfx('oof');
     if (R.hp <= 0 && window.MazeFight) { // on to the FINAL final boss
       R.st = 'decap'; rickSlam = null; phase = 'decap'; phaseT = 0; rockets = []; bonuses = [];
       say('Wait... what?!');
       return;
     }
     if (R.hp <= 0) {
-      R.st = 'down'; R.downT = 0; rickSlam = null; phase = 'win'; phaseT = 0;
+      R.st = 'down'; R.downT = 0; rickSlam = null; phase = 'win'; phaseT = 0; SFX.music(null); sfx('fanfare');
       say('Never gonna give... ugh');
       for (let i = 0; i < 5; i++) setTimeout(() => burst(R.x + (Math.random() - 0.5) * 200, R.y - 150 - Math.random() * 100, 30,
         ['#ff3b30', '#ffd23f', '#46d4ff', '#5ee07a', '#ff7ae0'], 380, 1.2), i * 220);
@@ -280,7 +249,7 @@
     R.st = 'attack'; R.stT = 0;
     rickSlam = { t: 0, tx: clamp(P.x, 60, WW - 60), ty: GY, done: false };
     say('Never gonna give you up!');
-    beep(220, 0.2, 'square', 0.05);
+    setTimeout(() => sfx('whistle'), 300);
   }
 
   function updateRick(dt) {
@@ -293,7 +262,7 @@
     switch (R.st) {
       case 'dance':
         R.fleeCd -= dt; R.atkTimer -= dt;
-        if (dist < FLEE_DIST && R.fleeCd <= 0) { R.st = 'flee'; R.stT = 0; if (Math.random() < 0.5) say(pick(['Too slow!', 'Catch me if you can!', 'Dance-off!', 'Nope!'])); }
+        if (dist < FLEE_DIST && R.fleeCd <= 0) { R.st = 'flee'; R.stT = 0; sfx('swoosh'); if (Math.random() < 0.5) say(pick(['Too slow!', 'Catch me if you can!', 'Dance-off!', 'Nope!'])); }
         else if (R.atkTimer <= 0) startRickSlam();
         break;
       case 'flee':
@@ -303,14 +272,14 @@
           R.x = clamp(R.x, 90, WW - 90);
           R.st = 'leap'; R.stT = 0;
           R.leap = { x0: R.x, x1: clamp(P.x - away * 330, 120, WW - 120), dur: 0.95 };
-          say('Wheee!'); beep(660, 0.25, 'triangle', 0.05);
+          say('Wheee!'); sfx('boing');
         } else if (dist > 430 || R.stT > 1.7) { R.st = 'dance'; R.stT = 0; R.fleeCd = 0.4; }
         break;
       case 'leap': {
         const k = clamp01(R.stT / R.leap.dur);
         R.x = R.leap.x0 + (R.leap.x1 - R.leap.x0) * k;
         R.y = GY - Math.sin(k * Math.PI) * 240;
-        if (k >= 1) { R.y = GY; R.st = 'dizzy'; R.stT = 0; shake = Math.max(shake, 6); say('Whoa... dizzy'); }
+        if (k >= 1) { R.y = GY; R.st = 'dizzy'; R.stT = 0; shake = Math.max(shake, 6); say('Whoa... dizzy'); sfx('land'); setTimeout(() => sfx('tweet'), 300); setTimeout(() => sfx('tweet'), 900); }
         break;
       }
       case 'dizzy':
@@ -333,7 +302,7 @@
       const before = s.t;
       s.t += dt;
       if (before < RICK_TL.slam && s.t >= RICK_TL.slam) {
-        thud(1.2); shake = Math.max(shake, 22);
+        sfx('slam'); sfx('rumble'); shake = Math.max(shake, 22);
         burst(s.tx, s.ty - 10, 40, ['#fff', '#ffd23f', '#ff3b30', '#ff8a3d'], 520, 0.8);
         if (Math.abs(P.x - s.tx) < 125) hurtPlayer(s.tx);
       }
@@ -352,14 +321,14 @@
       R.headless = true;
       rhead = { x: R.x + R.face * 3, y: R.y - 175, vx: -R.face * 90, vy: -720, rot: 0, vr: 9 * R.face, bounces: 0 };
       shake = Math.max(shake, 8);
-      beep(900, 0.06, 'square', 0.07); setTimeout(() => beep(1500, 0.08, 'square', 0.06), 40);
+      SFX.music(null); sfx('bigPop'); setTimeout(() => sfx('whistle'), 100);
       burst(rhead.x, rhead.y, 16, ['#fff', '#ffd23f'], 300);
       popText(rhead.x, rhead.y - 40, 'POP!', '#fff', 40);
     }
     if (rhead) {
       rhead.vy += 1500 * dt; rhead.x += rhead.vx * dt; rhead.y += rhead.vy * dt; rhead.rot += rhead.vr * dt;
       if (rhead.y >= GY - 20 && rhead.vy > 0) {
-        rhead.y = GY - 20; rhead.vy *= -0.5; rhead.bounces++; thud(0.4); shake = Math.max(shake, 5);
+        rhead.y = GY - 20; rhead.vy *= -0.5; rhead.bounces++; thud(0.4); sfx('boing'); shake = Math.max(shake, 5);
         if (rhead.bounces >= 2) split();
       }
     }
@@ -378,15 +347,16 @@
       const side = i % 2 ? 1 : -1;
       minis.push({ x, y, vx: side * (140 + Math.random() * 320), vy: -250 - Math.random() * 450, rot: 0 });
     }
-    thud(0.9); shake = Math.max(shake, 14);
+    sfx('boom'); shake = Math.max(shake, 14);
     burst(x, y, 40, ['#ddd', '#aaa', '#fff', '#d9692b'], 380, 0.9);
-    beep(200, 0.4, 'sawtooth', 0.07);
+    for (let i = 0; i < 4; i++) setTimeout(() => sfx('roll'), 150 + i * 160);
+    setTimeout(() => sfx('sting'), 700);
   }
   // Hand over to the maze level once the screen has faded to black.
   function handOff() {
     if (handedOff) return;
     handedOff = true; ended = true;
-    clearInterval(beatTimer);
+    SFX.music(null);
     removeEventListener('keydown', onKey, true);
     removeEventListener('keyup', onKey, true);
     removeEventListener('resize', resize);
@@ -404,7 +374,7 @@
       if (hitR || r.x < 0 || r.x > WW) {
         r.dead = true;
         burst(r.x, r.y, 30, ['#ff3b30', '#ffb838', '#fff', '#555'], 420, 0.7);
-        thud(0.7); shake = Math.max(shake, 10);
+        sfx('explosion'); shake = Math.max(shake, 10);
         if (hitR) hitRick(ROCKET_DMG);
       }
     }
@@ -416,6 +386,7 @@
       bonusTimer = 6 + Math.random() * 3;
       const type = P.hp < PLAYER_HP && Math.random() < 0.35 ? 'heart' : Math.random() < 0.6 ? 'rocket' : 'mega';
       bonuses.push({ type, x: clamp(cam.x + 80 + Math.random() * (W - 160), 60, WW - 60), y: -30, landed: false, life: 11, t: 0 });
+      sfx('ding');
     }
     for (const b of bonuses) {
       b.t += dt;
@@ -428,7 +399,7 @@
       if (Math.abs(P.x - b.x) < 42 && Math.abs(P.y - b.y) < 60) {
         b.dead = true;
         burst(b.x, b.y - 24, 16, ['#fff', '#ffd23f', '#5ee07a'], 260);
-        beep(660, 0.08, 'triangle', 0.06); setTimeout(() => beep(990, 0.12, 'triangle', 0.06), 80);
+        sfx(b.type === 'heart' ? 'coin' : 'powerup');
         if (b.type === 'rocket') { P.ammo += ROCKET_AMMO; popText(b.x, b.y - 70, 'ROCKET LAUNCHER!', '#7cff8a'); }
         else if (b.type === 'mega') { P.mega += MEGA_SLAMS; popText(b.x, b.y - 70, 'MEGA SLAM!', '#ffd23f'); }
         else { P.hp = Math.min(PLAYER_HP, P.hp + 1); popText(b.x, b.y - 70, '+1 HEART', '#ff5a7a'); }
@@ -819,7 +790,7 @@
       ctx.fillText(left ? '◀ RICK' : 'RICK ▶', left ? 14 : W - 14, GY - 120);
     }
     ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('A / D move · W jump · S or Space slam (or fire rockets)', W / 2, H - 14);
+    ctx.fillText('A / D move · W jump · S or Space slam (or fire rockets) · M mute', W / 2, H - 14);
 
     // intro / end cards
     if (phase === 'intro') {
