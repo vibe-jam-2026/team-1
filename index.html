@@ -17,17 +17,15 @@
   .hud { display: flex; gap: 22px; align-items: baseline; font-variant-numeric: tabular-nums; }
   .hud .k { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--mut); }
   .hud b { font-size: 24px; display: block; }
-  .rule { font-size: 14px; color: var(--mut); min-height: 20px; text-align: center; }
-  .rule strong { color: var(--bad); }
-  .rule.warn strong { animation: blink .3s steps(2) infinite; }
   @keyframes blink { 50% { opacity: .2; } }
   canvas { display: block; border-radius: 6px; }
   .controls { display: flex; gap: 12px; }
   .controls button { width: 130px; height: 64px; border-radius: 12px; border: 2px solid var(--wall);
     background: var(--panel); color: var(--ink); font-size: 28px; cursor: pointer; position: relative; }
   .controls button small { display: block; font-size: 11px; color: var(--mut); letter-spacing: .06em; }
-  .controls button.forbidden { border-color: var(--bad); color: var(--bad); }
-  .controls button.forbidden small { color: var(--bad); }
+  .controls button.forbidden { background: var(--bad); border-color: #ff8a80; color: #fff;
+    box-shadow: 0 0 18px rgba(255, 90, 78, .55); }
+  .controls button.forbidden small { color: #fff; }
   .controls button.forbidden.warn { animation: blink .3s steps(2) infinite; }
   .controls button:active { transform: translateY(1px); }
   .help { font-size: 12px; color: var(--mut); }
@@ -41,7 +39,6 @@
     <div><span class="k">Best</span><b id="best">0</b></div>
     <div><span class="k">Length</span><b id="len">0</b></div>
   </div>
-  <div class="rule" id="rule"></div>
   <canvas id="c"></canvas>
   <div class="controls">
     <button id="btnL" aria-label="Turn left">&#8630;<small>LEFT</small></button>
@@ -65,7 +62,7 @@
 
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
   const $ = id => document.getElementById(id);
-  const scoreEl = $('score'), bestEl = $('best'), lenEl = $('len'), ruleEl = $('rule');
+  const scoreEl = $('score'), bestEl = $('best'), lenEl = $('len');
   const btnL = $('btnL'), btnR = $('btnR');
 
   let best = 0;
@@ -192,7 +189,7 @@
   // ---- Rendering ----
   let cell = 20, pad = 6;
   function resize() {
-    const availW = innerWidth - 32, availH = innerHeight - 250;
+    const availW = innerWidth - 24, availH = innerHeight - 185;
     cell = Math.max(10, Math.floor(Math.min(availW / COLS, availH / ROWS)));
     const w = COLS * cell + pad * 2, h = ROWS * cell + pad * 2, dpr = devicePixelRatio || 1;
     cv.width = w * dpr; cv.height = h * dpr;
@@ -275,11 +272,6 @@
     bestEl.textContent = best;
     lenEl.textContent = snake.length + grow;
     const warn = state === 'playing' && swapTimer <= SWAP_WARN;
-    const side = forbidden < 0 ? 'LEFT ←' : 'RIGHT →';
-    ruleEl.className = 'rule' + (warn ? ' warn' : '');
-    ruleEl.innerHTML = warn
-      ? `Forbidden side swaps in ${Math.ceil(swapTimer)}…`
-      : `Don't press <strong>${side}</strong> — it grows the snake (swaps in ${Math.ceil(swapTimer)}s)`;
     for (const [b, s] of [[btnL, -1], [btnR, 1]]) {
       b.classList.toggle('forbidden', s === forbidden);
       b.classList.toggle('warn', warn && s === forbidden);
