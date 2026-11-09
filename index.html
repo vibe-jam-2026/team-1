@@ -92,6 +92,7 @@
   <div class="help">W A S D or arrow keys to steer<br>P to pause · <a href="instructions.html">instructions</a></div>
   </div>
 </div>
+<script src="boss.js"></script>
 <script>
 (() => {
   // ---- Tunables (we will iterate on these) ----
@@ -113,7 +114,9 @@
   const RB_EVERY = () => 5 + Math.random() * 6; // seconds until the next red button
   // Arm timeline (seconds into the 'arm' state): reach out, wind up high, SLAM, then let the impact ring out.
   const T_REACH = 0.45, T_WIND = 0.75, T_SLAM = 0.83, ARM_TIME = 1.5;
-  const RICK_TIME = 2;         // freeze with the banner before play resumes on top of the video
+  const RICK_TIME = 0.6;       // short pause while the video starts, then play resumes on top of it
+  const BLUE_CHANCE = 0.35;    // chance a button is the blue one, which starts the boss fight
+  const BOSS_WIN_POINTS = 25;
   const HIT_PAUSE = 1.2;       // freeze after a hit
   // Power-ups: bomb, shield, scissors. Some of them are traps.
   const PU_EVERY = () => 5 + Math.random() * 5; // seconds until the next power-up
@@ -433,7 +436,7 @@
     if (!rb) {
       if (rolling) return; // no new red button while the video plays
       rbTimer -= dt;
-      if (rbTimer <= 0) rb = { x: 1 + Math.random() * (COLS - 2), y: -0.5, life: RB_LIFE };
+      if (rbTimer <= 0) rb = { x: 1 + Math.random() * (COLS - 2), y: -0.5, life: RB_LIFE, blue: Math.random() < BLUE_CHANCE };
       return;
     }
     const h = snake[0], hx = h.x + 0.5, hy = h.y + 0.5;
@@ -444,6 +447,24 @@
     if (rb.life <= 0) { rb = null; rbTimer = RB_EVERY(); }
   }
 
+  // The blue button: off to a different game, the boss fight against Rick (boss.js).
+  function startBoss() {
+    state = 'boss';
+    stopRoll();
+    BossFight.start(result => {
+      obstacles = []; items = []; turns = [];
+      if (result === 'win') {
+        score += BOSS_WIN_POINTS;
+        if (score > best) { best = score; try { localStorage.setItem('snakeDodgeBest', best); } catch (e) {} }
+        popup(snake[0].x + 0.5, snake[0].y + 0.5, `BOSS DEFEATED +${BOSS_WIN_POINTS}`, '#5ee07a');
+      } else {
+        score = 0;
+        popup(snake[0].x + 0.5, snake[0].y + 0.5, 'SCORE RESET', '#ff5a4e');
+      }
+      state = 'ready';
+    });
+  }
+
   function impact() {
     thud();
     beep(1400, 0.05, 'square', 0.05);
@@ -451,7 +472,7 @@
     for (let i = 0; i < 26; i++) {
       const a = Math.random() * Math.PI * 2, v = 6 + Math.random() * 12;
       sparks.push({ x: rb.x, y: rb.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.3 + Math.random() * 0.4,
-        c: ['#fff', '#ffd23f', '#ff3b30', '#ff8a3d'][i % 4] });
+        c: (rb.blue ? ['#fff', '#9fe0ff', '#2f7bff', '#46d4ff'] : ['#fff', '#ffd23f', '#ff3b30', '#ff8a3d'])[i % 4] });
     }
   }
 
@@ -469,7 +490,12 @@
       if (before < T_SLAM && armT >= T_SLAM) impact();
       for (const p of sparks) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; p.life -= dt; }
       sparks = sparks.filter(p => p.life > 0);
-      if (armT >= ARM_TIME) { state = 'rick'; rickT = 0; rb = null; sparks = []; rbTimer = RB_EVERY(); cv.style.transform = ''; startRoll(); }
+      if (armT >= ARM_TIME) {
+        const blue = rb.blue;
+        rb = null; sparks = []; rbTimer = RB_EVERY(); cv.style.transform = '';
+        if (blue) startBoss();
+        else { state = 'rick'; rickT = 0; startRoll(); }
+      }
       return;
     }
     if (state === 'rick') {
@@ -575,11 +601,12 @@
       const fade = Math.min(1, rb.life / 1.5), pulse = state === 'arm' ? 1 : 1 + Math.sin(performance.now() / 120) * 0.08;
       const bx = rb.x * cell, by = rb.y * cell, R = cell * 0.7 * pulse;
       ctx.globalAlpha = fade;
-      ctx.fillStyle = 'rgba(255,60,50,.25)';
+      const col = rb.blue ? ['rgba(50,130,255,.28)', '#2f7bff', '#1d4fb3'] : ['rgba(255,60,50,.25)', '#ff3b30', '#a8201a'];
+      ctx.fillStyle = col[0];
       ctx.beginPath(); ctx.arc(bx, by, R * 1.6, 0, 7); ctx.fill();
       ctx.fillStyle = '#2b2f38';
       ctx.beginPath(); ctx.arc(bx, by + cell * 0.12, R, 0, 7); ctx.fill();
-      ctx.fillStyle = pressed ? '#a8201a' : '#ff3b30';
+      ctx.fillStyle = pressed ? col[2] : col[1];
       ctx.beginPath();
       if (pressed) ctx.ellipse(bx, by + cell * 0.08, R * 0.85, R * 0.6, 0, 0, 7); // squashed flat
       else ctx.arc(bx, by - cell * 0.12, R * 0.75, 0, 7);
@@ -589,11 +616,12 @@
       // the "DON'T PRESS" sign hanging under it
       const fs = Math.max(9, cell * 0.42), ly = by + cell * 1.25;
       ctx.font = `800 ${fs}px system-ui, sans-serif`;
-      const tw = ctx.measureText("DON'T PRESS").width + fs * 0.9;
-      ctx.fillStyle = 'rgba(15,17,22,.9)'; ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = Math.max(1.5, cell * 0.06);
+      const label = rb.blue ? "ALSO DON'T PRESS" : "DON'T PRESS";
+      const tw = ctx.measureText(label).width + fs * 0.9;
+      ctx.fillStyle = 'rgba(15,17,22,.9)'; ctx.strokeStyle = col[1]; ctx.lineWidth = Math.max(1.5, cell * 0.06);
       ctx.beginPath(); ctx.roundRect(bx - tw / 2, ly - fs * 0.8, tw, fs * 1.6, fs * 0.4); ctx.fill(); ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText("DON'T PRESS", bx, ly + fs * 0.05);
+      ctx.fillText(label, bx, ly + fs * 0.05);
       ctx.textBaseline = 'alphabetic';
       ctx.globalAlpha = 1;
     }
@@ -701,7 +729,6 @@
       cv.style.transform = `translate(${(Math.random() * 2 - 1) * a}px, ${(Math.random() * 2 - 1) * a}px)`;
     } else if (cv.style.transform) cv.style.transform = '';
 
-    if (state === 'rick') return drawRick(W, H);
 
     // overlays
     const my = pad + H * 0.36;
@@ -880,20 +907,7 @@
     }
   }
 
-  function drawRick(W, H) {
-    const t = rickT;
-    ctx.save();
-    ctx.translate(pad + W / 2, pad + H * 0.3);
-    ctx.rotate(Math.sin(t * 5) * 0.12);
-    const sc = 1 + Math.sin(t * 10) * 0.08; ctx.scale(sc, sc);
-    ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
-    ctx.shadowColor = '#000'; ctx.shadowBlur = 8;
-    ctx.font = `800 ${Math.max(22, cell * 1.6)}px system-ui, sans-serif`;
-    ctx.fillText('RICK ROLLED!', 0, 0);
-    ctx.font = `600 ${Math.max(12, cell * 0.7)}px system-ui, sans-serif`;
-    ctx.fillText('Survive on top of the video. Get hit to make it stop.', 0, cell * 1.2);
-    ctx.restore();
-  }
+
 
 
   function hud() {
