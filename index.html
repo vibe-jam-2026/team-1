@@ -46,7 +46,6 @@
   .controls button.forbidden { background: var(--bad); border-color: #ff8a80; color: #fff;
     box-shadow: 0 0 18px rgba(255, 90, 78, .55); }
   .controls button.forbidden small { color: #fff; }
-  .controls button.forbidden.warn { animation: blink .3s steps(2) infinite; }
   .controls button:active { transform: translateY(1px); }
   /* a key that is switched off for a moment, without warning */
   .controls button.off { background: #0d0f13; border-color: #2a2e38; color: #4a5060; box-shadow: none;
@@ -85,12 +84,13 @@
   // ---- Tunables (we will iterate on these) ----
   const COLS = 36, ROWS = 24;
   const START_LEN = 4;
-  const GROW_PENALTY = 3;      // segments added when pressing the forbidden side
+  const GROW_PENALTY = 3;      // segments added when pressing the forbidden key
   const MOVE_TIME = 0.14;      // seconds per snake step
-  const SWAP_MIN = 4, SWAP_MAX = 8;   // seconds before the forbidden key changes (random in range)
+  // The forbidden key comes and goes: a while with every key safe, then one key is red for a moment.
+  const SAFE_TIME = () => 4 + Math.random() * 2;      // seconds with no forbidden key (about 5)
+  const FORBID_TIME = () => 1.5 + Math.random() * 1;  // seconds one key is forbidden (about 2)
   const OFF_EVERY = () => 4 + Math.random() * 7; // seconds until a key is suddenly switched off
   const OFF_TIME = () => 0.9 + Math.random() * 0.5; // ...and for how long
-  const SWAP_WARN = 1.5;       // seconds of warning before it changes
   const RB_SPEED = 1.6;        // red button speed, cells/second (it homes in on the head)
   const RB_REACH = 3;        // how close the head must get before the arm presses it
   const RB_LIFE = 14;          // seconds before an unpressed red button fades away
@@ -102,7 +102,6 @@
 
   // Directions (also the key ids): 0 up/W, 1 right/D, 2 down/S, 3 left/A.
   const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-  const KEYS = ['W', 'D', 'S', 'A'];
 
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
   const $ = id => document.getElementById(id);
@@ -113,14 +112,15 @@
   try { best = +localStorage.getItem('snakeDodgeBest') || 0; } catch (e) {}
 
   let snake, dir, turns, grow, obstacles, score, state, moveAcc, spawnAcc, elapsed;
-  let forbidden = Math.floor(Math.random() * 4), swapTimer = 0;
+  let forbidden = -1, swapTimer = 0; // forbidden: the red key right now (-1 = none)
   let hitTimer = 0, penaltyFlash = 0, hitMsg = '';
   let offKey = -1, offTimer = 0; // offKey: the key that is switched off right now (-1 = none)
   let rb = null, rbTimer = 0, armT = 0, rickT = 0, sparks = [];
-  const swapIn = () => SWAP_MIN + Math.random() * (SWAP_MAX - SWAP_MIN);
-  function newForbidden() {
-    let k; do k = Math.floor(Math.random() * 4); while (k === forbidden);
-    forbidden = k; swapTimer = swapIn();
+  function toggleForbidden() {
+    if (forbidden >= 0) { forbidden = -1; swapTimer = SAFE_TIME(); return; }
+    do forbidden = Math.floor(Math.random() * 4); while (forbidden === offKey);
+    swapTimer = FORBID_TIME();
+    beep(880, 0.12, 'triangle', 0.08);
   }
 
   function reset() {
@@ -129,7 +129,7 @@
     for (let i = 0; i < START_LEN; i++) snake.push({ x: x - i + 1, y });
     dir = 1; turns = []; grow = 0; obstacles = [];
     score = 0; moveAcc = 0; spawnAcc = 0.6; elapsed = 0;
-    swapTimer = swapIn();
+    forbidden = -1; swapTimer = SAFE_TIME(); // every key is safe at the start
     offKey = -1; offTimer = OFF_EVERY();
     rb = null; rbTimer = 3 + Math.random() * 3;
     state = 'ready';
@@ -317,7 +317,7 @@
         offTimer = OFF_TIME();
       } else { offKey = -1; offTimer = OFF_EVERY(); }
     }
-    if (swapTimer <= 0) { newForbidden(); beep(880, 0.12, 'triangle', 0.08); }
+    if (swapTimer <= 0) toggleForbidden();
 
     moveAcc += dt;
     while (moveAcc >= MOVE_TIME && state === 'playing') { moveAcc -= MOVE_TIME; step(); }
@@ -447,7 +447,7 @@
       ctx.fillText(msg[1], pad + W / 2, my + cell * 0.8);
       if (state === 'ready') {
         ctx.fillStyle = '#ff5a4e';
-        ctx.fillText(`Don't press the red key (${KEYS[forbidden]}): it makes you grow`, pad + W / 2, my + cell * 2);
+        ctx.fillText(`When a key turns red, don't press it: it makes you grow`, pad + W / 2, my + cell * 2);
       }
     }
   }
@@ -577,11 +577,9 @@
     scoreEl.textContent = score;
     bestEl.textContent = best;
     lenEl.textContent = snake.length + grow;
-    const warn = state === 'playing' && swapTimer <= SWAP_WARN;
     for (const b of btns) {
       const k = +b.dataset.k;
       b.classList.toggle('forbidden', k === forbidden);
-      b.classList.toggle('warn', warn && k === forbidden);
       b.classList.toggle('off', k === offKey);
       b.querySelector('small').textContent = k === offKey ? 'OFF' : k === forbidden ? `+${GROW_PENALTY}` : '↑→↓←'[k];
     }
