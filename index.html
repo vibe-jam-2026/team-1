@@ -22,7 +22,14 @@
   body.rolling .bgvid { opacity: 1; visibility: visible; }
   body.rolling .hud, body.rolling .help { text-shadow: 0 1px 4px #000, 0 0 2px #000; }
   body.rolling .hud .k, body.rolling .help, body.rolling a { color: #e9ecf1; }
-  .app { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; align-items: center; padding: 12px 16px; gap: 10px; }
+  .app { position: relative; z-index: 1; height: 100%; display: flex; align-items: center; justify-content: center; padding: 12px 16px; gap: 24px; }
+  .side { width: 232px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+  .help { text-align: center; }
+  @media (max-width: 760px) {
+    .app { flex-direction: column; justify-content: flex-start; gap: 10px; }
+    .side { display: contents; }
+    .hud { order: -1; }
+  }
   .hud { display: flex; gap: 22px; align-items: baseline; font-variant-numeric: tabular-nums; }
   .hud .k { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--mut); }
   .hud b { font-size: 24px; display: block; }
@@ -41,6 +48,12 @@
   .controls button.forbidden small { color: #fff; }
   .controls button.forbidden.warn { animation: blink .3s steps(2) infinite; }
   .controls button:active { transform: translateY(1px); }
+  /* a key that is switched off for a moment, without warning */
+  .controls button.off { background: #0d0f13; border-color: #2a2e38; color: #4a5060; box-shadow: none;
+    text-decoration: line-through; animation: none; }
+  .controls button.off small { color: #6b7180; }
+  .controls button.off.jolt { animation: jolt .25s; }
+  @keyframes jolt { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
   .help { font-size: 12px; color: var(--mut); }
   a { color: var(--mut); }
 </style>
@@ -51,34 +64,40 @@
     src="https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1&controls=0&disablekb=1&loop=1&playlist=dQw4w9WgXcQ&modestbranding=1&playsinline=1&rel=0&iv_load_policy=3"></iframe>
 </div>
 <div class="app">
+  <canvas id="c"></canvas>
+  <div class="side">
   <div class="hud">
     <div><span class="k">Score</span><b id="score">0</b></div>
     <div><span class="k">Best</span><b id="best">0</b></div>
     <div><span class="k">Length</span><b id="len">0</b></div>
   </div>
-  <canvas id="c"></canvas>
   <div class="controls">
     <button data-k="0" aria-label="Up">W<small>↑</small></button>
     <button data-k="3" aria-label="Left">A<small>←</small></button>
     <button data-k="2" aria-label="Down">S<small>↓</small></button>
     <button data-k="1" aria-label="Right">D<small>→</small></button>
   </div>
-  <div class="help">W A S D or arrow keys to steer · P to pause · <a href="instructions.html">instructions</a></div>
+  <div class="help">W A S D or arrow keys to steer<br>P to pause · <a href="instructions.html">instructions</a></div>
+  </div>
 </div>
 <script>
 (() => {
   // ---- Tunables (we will iterate on these) ----
-  const COLS = 19, ROWS = 23;
+  const COLS = 36, ROWS = 24;
   const START_LEN = 4;
   const GROW_PENALTY = 3;      // segments added when pressing the forbidden side
   const MOVE_TIME = 0.14;      // seconds per snake step
-  const SWAP_MIN = 10, SWAP_MAX = 22; // seconds before the forbidden key changes (random in range)
-  const SWAP_WARN = 2;         // seconds of warning before it changes
+  const SWAP_MIN = 4, SWAP_MAX = 8;   // seconds before the forbidden key changes (random in range)
+  const OFF_EVERY = () => 4 + Math.random() * 7; // seconds until a key is suddenly switched off
+  const OFF_TIME = () => 0.9 + Math.random() * 0.5; // ...and for how long
+  const SWAP_WARN = 1.5;       // seconds of warning before it changes
   const RB_SPEED = 1.6;        // red button speed, cells/second (it homes in on the head)
   const RB_REACH = 3;        // how close the head must get before the arm presses it
   const RB_LIFE = 14;          // seconds before an unpressed red button fades away
   const RB_EVERY = () => 5 + Math.random() * 6; // seconds until the next red button
-  const ARM_TIME = 0.8, RICK_TIME = 2; // RICK_TIME: freeze with the banner before play resumes on top of the video
+  // Arm timeline (seconds into the 'arm' state): reach out, wind up high, SLAM, then let the impact ring out.
+  const T_REACH = 0.45, T_WIND = 0.75, T_SLAM = 0.83, ARM_TIME = 1.5;
+  const RICK_TIME = 2;         // freeze with the banner before play resumes on top of the video
   const HIT_PAUSE = 1.2;       // freeze after a hit
 
   // Directions (also the key ids): 0 up/W, 1 right/D, 2 down/S, 3 left/A.
@@ -96,7 +115,8 @@
   let snake, dir, turns, grow, obstacles, score, state, moveAcc, spawnAcc, elapsed;
   let forbidden = Math.floor(Math.random() * 4), swapTimer = 0;
   let hitTimer = 0, penaltyFlash = 0, hitMsg = '';
-  let rb = null, rbTimer = 0, armT = 0, rickT = 0;
+  let offKey = -1, offTimer = 0; // offKey: the key that is switched off right now (-1 = none)
+  let rb = null, rbTimer = 0, armT = 0, rickT = 0, sparks = [];
   const swapIn = () => SWAP_MIN + Math.random() * (SWAP_MAX - SWAP_MIN);
   function newForbidden() {
     let k; do k = Math.floor(Math.random() * 4); while (k === forbidden);
@@ -110,6 +130,7 @@
     dir = 1; turns = []; grow = 0; obstacles = [];
     score = 0; moveAcc = 0; spawnAcc = 0.6; elapsed = 0;
     swapTimer = swapIn();
+    offKey = -1; offTimer = OFF_EVERY();
     rb = null; rbTimer = 3 + Math.random() * 3;
     state = 'ready';
   }
@@ -152,16 +173,37 @@
     } catch (e) {}
   }
 
+  // A heavy slam: a low pitch drop plus a burst of noise.
+  function thud() {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const t = actx.currentTime;
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(30, t + 0.35);
+      g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.45);
+      const len = Math.floor(actx.sampleRate * 0.25), buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+      const n = actx.createBufferSource(), f = actx.createBiquadFilter(), ng = actx.createGain();
+      n.buffer = buf; f.type = 'lowpass'; f.frequency.value = 1400; ng.gain.value = 0.5;
+      n.connect(f).connect(ng).connect(actx.destination); n.start(t);
+    } catch (e) {}
+  }
+
   // ---- Input ----
   function press(k) {
     if (state === 'ready' || state === 'paused') { state = 'playing'; return; }
     if (state !== 'playing') return;
+    if (k === offKey) { // switched off: nothing happens, just a dead clunk
+      beep(70, 0.07, 'square', 0.05);
+      const b = btns.find(b => +b.dataset.k === k);
+      b.classList.remove('jolt'); void b.offsetWidth; b.classList.add('jolt');
+      return;
+    }
     if (k === forbidden) {
       grow += GROW_PENALTY; penaltyFlash = 0.35;
-      beep(140, 0.18, 'sawtooth', 0.08);
-      return; // the forbidden key only punishes, it does not steer
-    }
-    beep(520, 0.03, 'square', 0.03);
+      beep(140, 0.18, 'sawtooth', 0.08); // it still steers, but you pay for it
+    } else beep(520, 0.03, 'square', 0.03);
     const lastDir = turns.length ? turns[turns.length - 1] : dir;
     if (k !== lastDir && k !== (lastDir + 2) % 4 && turns.length < 2) turns.push(k);
   }
@@ -192,8 +234,8 @@
 
   function step() {
     if (turns.length) dir = turns.shift();
-    // no walls: leaving one side brings you back on the opposite side
-    const h = snake[0], nx = (h.x + DIRS[dir][0] + COLS) % COLS, ny = (h.y + DIRS[dir][1] + ROWS) % ROWS;
+    const h = snake[0], nx = h.x + DIRS[dir][0], ny = h.y + DIRS[dir][1];
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return hit('Hit the wall');
     const body = grow > 0 ? snake : snake.slice(0, -1);
     if (body.some(s => s.x === nx && s.y === ny)) return hit('Bit yourself');
     snake.unshift({ x: nx, y: ny });
@@ -232,6 +274,17 @@
     if (rb.life <= 0) { rb = null; rbTimer = RB_EVERY(); }
   }
 
+  function impact() {
+    thud();
+    beep(1400, 0.05, 'square', 0.05);
+    sparks = [];
+    for (let i = 0; i < 26; i++) {
+      const a = Math.random() * Math.PI * 2, v = 6 + Math.random() * 12;
+      sparks.push({ x: rb.x, y: rb.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.3 + Math.random() * 0.4,
+        c: ['#fff', '#ffd23f', '#ff3b30', '#ff8a3d'][i % 4] });
+    }
+  }
+
   function update(dt) {
     if (penaltyFlash > 0) penaltyFlash -= dt;
     if (state === 'hit') {
@@ -240,8 +293,12 @@
       return;
     }
     if (state === 'arm') {
+      const before = armT;
       armT += dt;
-      if (armT >= ARM_TIME) { state = 'rick'; rickT = 0; rb = null; rbTimer = RB_EVERY(); startRoll(); }
+      if (before < T_SLAM && armT >= T_SLAM) impact();
+      for (const p of sparks) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; p.life -= dt; }
+      sparks = sparks.filter(p => p.life > 0);
+      if (armT >= ARM_TIME) { state = 'rick'; rickT = 0; rb = null; sparks = []; rbTimer = RB_EVERY(); cv.style.transform = ''; startRoll(); }
       return;
     }
     if (state === 'rick') {
@@ -253,6 +310,13 @@
 
     elapsed += dt;
     swapTimer -= dt;
+    offTimer -= dt;
+    if (offTimer <= 0) {
+      if (offKey < 0) { // out of nowhere: switch off a key that is not the forbidden one
+        do offKey = Math.floor(Math.random() * 4); while (offKey === forbidden);
+        offTimer = OFF_TIME();
+      } else { offKey = -1; offTimer = OFF_EVERY(); }
+    }
     if (swapTimer <= 0) { newForbidden(); beep(880, 0.12, 'triangle', 0.08); }
 
     moveAcc += dt;
@@ -260,7 +324,7 @@
     if (state !== 'playing') return;
 
     spawnAcc -= dt;
-    if (spawnAcc <= 0) { spawn(); spawnAcc = 1.1 - difficulty() * 0.75 + Math.random() * 0.3; }
+    if (spawnAcc <= 0) { spawn(); spawnAcc = (1.1 - difficulty() * 0.75 + Math.random() * 0.3) * 19 / COLS; }
 
     updateRedButton(dt);
     if (state !== 'playing') return;
@@ -279,7 +343,8 @@
   // ---- Rendering ----
   let cell = 20, pad = 6;
   function resize() {
-    const availW = innerWidth - 24, availH = innerHeight - 220;
+    const stacked = innerWidth <= 760; // narrow screens put the controls under the board
+    const availW = stacked ? innerWidth - 24 : innerWidth - 232 - 24 - 40, availH = stacked ? innerHeight - 220 : innerHeight - 24;
     cell = Math.max(10, Math.floor(Math.min(availW / COLS, availH / ROWS)));
     const w = COLS * cell + pad * 2, h = ROWS * cell + pad * 2, dpr = devicePixelRatio || 1;
     cv.width = w * dpr; cv.height = h * dpr;
@@ -318,16 +383,19 @@
 
     // red button
     if (rb) {
-      const pressed = state === 'arm' && armT > ARM_TIME * 0.75;
-      const fade = Math.min(1, rb.life / 1.5), pulse = 1 + Math.sin(performance.now() / 120) * 0.08;
+      const pressed = state === 'arm' && armT >= T_SLAM;
+      const fade = Math.min(1, rb.life / 1.5), pulse = state === 'arm' ? 1 : 1 + Math.sin(performance.now() / 120) * 0.08;
       const bx = rb.x * cell, by = rb.y * cell, R = cell * 0.7 * pulse;
       ctx.globalAlpha = fade;
       ctx.fillStyle = 'rgba(255,60,50,.25)';
       ctx.beginPath(); ctx.arc(bx, by, R * 1.6, 0, 7); ctx.fill();
       ctx.fillStyle = '#2b2f38';
       ctx.beginPath(); ctx.arc(bx, by + cell * 0.12, R, 0, 7); ctx.fill();
-      ctx.fillStyle = pressed ? '#b3261e' : '#ff3b30';
-      ctx.beginPath(); ctx.arc(bx, by - (pressed ? 0 : cell * 0.12), R * 0.75, 0, 7); ctx.fill();
+      ctx.fillStyle = pressed ? '#a8201a' : '#ff3b30';
+      ctx.beginPath();
+      if (pressed) ctx.ellipse(bx, by + cell * 0.08, R * 0.85, R * 0.6, 0, 0, 7); // squashed flat
+      else ctx.arc(bx, by - cell * 0.12, R * 0.75, 0, 7);
+      ctx.fill();
       ctx.fillStyle = 'rgba(255,255,255,.45)';
       ctx.beginPath(); ctx.arc(bx - R * 0.25, by - R * 0.35, R * 0.18, 0, 7); ctx.fill();
       ctx.globalAlpha = 1;
@@ -350,18 +418,16 @@
       ctx.arc(cx + dx * cell * 0.18 + -dy * sgn * cell * 0.2, cy + dy * cell * 0.18 + dx * sgn * cell * 0.2, Math.max(1.5, cell * 0.08), 0, 7);
       ctx.fill();
     }
-    // the arm reaching for the red button
-    if (state === 'arm' && rb) {
-      const t = Math.min(1, armT / (ARM_TIME * 0.75));
-      const ex = cx + (rb.x * cell - cx) * t, ey = cy + (rb.y * cell - cy) * t;
-      const wob = Math.sin(t * Math.PI) * cell * 0.6, len = Math.hypot(ex - cx, ey - cy) || 1;
-      const mx = (cx + ex) / 2 - (ey - cy) / len * wob, my2 = (cy + ey) / 2 + (ex - cx) / len * wob;
-      ctx.strokeStyle = '#5ee07a'; ctx.lineWidth = cell * 0.36; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.quadraticCurveTo(mx, my2, ex, ey); ctx.stroke();
-      ctx.fillStyle = '#a6f5b5';
-      ctx.beginPath(); ctx.arc(ex, ey, cell * 0.34, 0, 7); ctx.fill();
-    }
+    // the arm and hand that slam the red button
+    if (state === 'arm' && rb) drawArm(cx, cy);
     ctx.restore();
+
+    // screen shake right after the slam
+    const ti = state === 'arm' ? armT - T_SLAM : -1;
+    if (ti >= 0 && ti < 0.45) {
+      const a = cell * 0.5 * (1 - ti / 0.45);
+      cv.style.transform = `translate(${(Math.random() * 2 - 1) * a}px, ${(Math.random() * 2 - 1) * a}px)`;
+    } else if (cv.style.transform) cv.style.transform = '';
 
     if (state === 'rick') return drawRick(W, H);
 
@@ -383,6 +449,111 @@
         ctx.fillStyle = '#ff5a4e';
         ctx.fillText(`Don't press the red key (${KEYS[forbidden]}): it makes you grow`, pad + W / 2, my + cell * 2);
       }
+    }
+  }
+
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  const clamp01 = t => Math.max(0, Math.min(1, t));
+
+  // An open cartoon hand seen from above, fingers pointing along +x, in units of one cell.
+  function drawHand(spread) {
+    ctx.translate(0.1, 0); // so the middle of the palm is what lands on the button
+    ctx.fillStyle = '#9bf0ac'; ctx.strokeStyle = '#2c8a44'; ctx.lineWidth = 0.05; ctx.lineJoin = 'round';
+    const fingers = [[-0.21, 0.30], [-0.07, 0.38], [0.07, 0.36], [0.21, 0.28]]; // [side offset, length]
+    fingers.forEach(([y, len], i) => {
+      ctx.save();
+      ctx.translate(0.12, y);
+      ctx.rotate((i - 1.5) * spread);
+      ctx.beginPath(); ctx.roundRect(0, -0.06, len, 0.12, 0.06); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    });
+    // thumb
+    ctx.save();
+    ctx.translate(-0.08, 0.24); ctx.rotate(0.9 + spread);
+    ctx.beginPath(); ctx.roundRect(0, -0.065, 0.3, 0.13, 0.065); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    // palm
+    ctx.beginPath(); ctx.roundRect(-0.36, -0.29, 0.52, 0.58, 0.16); ctx.fill(); ctx.stroke();
+    // knuckle creases
+    ctx.strokeStyle = 'rgba(44,138,68,.55)'; ctx.lineWidth = 0.035;
+    for (const [y] of fingers) { ctx.beginPath(); ctx.moveTo(0.06, y - 0.04); ctx.lineTo(0.06, y + 0.04); ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(-0.12, 0.02, 0.14, -1, 1); ctx.stroke();
+  }
+
+  function drawArm(cx, cy) {
+    const t = armT, bx = rb.x * cell, by = rb.y * cell;
+    // where the hand is over the ground, and how high it is lifted (0 = touching the button)
+    const reach = ease(clamp01(t / T_REACH));
+    let lift;
+    if (t < T_REACH) lift = Math.sin(reach * Math.PI / 2) * 1.0;
+    else if (t < T_WIND) lift = 1 + ease((t - T_REACH) / (T_WIND - T_REACH)) * 0.5;      // wind up higher
+    else if (t < T_SLAM) lift = 1.5 * (1 - Math.pow((t - T_WIND) / (T_SLAM - T_WIND), 2)); // SLAM
+    else lift = Math.abs(Math.sin((t - T_SLAM) * 18)) * 0.12 * Math.max(0, 1 - (t - T_SLAM) * 4); // small rebound
+    const tremble = t > T_REACH && t < T_WIND ? (Math.random() - 0.5) * cell * 0.08 : 0;
+    const gx = cx + (bx - cx) * reach, gy = cy + (by - cy) * reach;
+    const hx = gx + tremble, hy = gy - lift * cell * 1.1 + tremble;   // lifted hands are drawn higher...
+    const scale = cell * 2.3 * (1 + lift * 0.4);                       // ...and bigger, as if closer to you
+    const ang = Math.atan2(by - cy, bx - cx);
+    const slammed = t >= T_SLAM;
+
+    // shadow on the ground: small and faint when the hand is high
+    ctx.fillStyle = `rgba(0,0,0,${0.45 - lift * 0.2})`;
+    ctx.beginPath(); ctx.ellipse(gx, gy, cell * (0.75 - lift * 0.25), cell * (0.55 - lift * 0.2), ang, 0, 7); ctx.fill();
+
+    // arm: a thick bendy tube from the head to the wrist
+    const wx = hx - Math.cos(ang) * scale * 0.2, wy = hy - Math.sin(ang) * scale * 0.2;
+    const mx = (cx + wx) / 2, my = (cy + wy) / 2 - cell * (0.6 + lift * 0.8);
+    ctx.lineCap = 'round';
+    for (const [w, c] of [[0.5, '#2c8a44'], [0.38, '#5ee07a']]) {
+      ctx.strokeStyle = c; ctx.lineWidth = cell * w * (1 + lift * 0.2);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.quadraticCurveTo(mx, my, wx, wy); ctx.stroke();
+    }
+
+    // the hand; fingers splay on impact, motion lines while slamming
+    ctx.save();
+    ctx.translate(hx, hy); ctx.rotate(ang); ctx.scale(scale, slammed && t - T_SLAM < 0.08 ? scale * 1.15 : scale);
+    drawHand(slammed ? 0.22 : t < T_REACH ? 0.12 : 0.06);
+    ctx.restore();
+    if (t >= T_WIND && t < T_SLAM + 0.04) {
+      ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = Math.max(2, cell * 0.08);
+      for (const o of [-0.6, 0, 0.6]) {
+        ctx.beginPath(); ctx.moveTo(hx + o * cell, hy - cell * 1.6); ctx.lineTo(hx + o * cell, hy - cell * 0.7); ctx.stroke();
+      }
+    }
+
+    // impact effects
+    const ti = t - T_SLAM;
+    if (ti >= 0) {
+      for (const [delay, speed] of [[0, 14], [0.06, 10]]) {          // shockwaves
+        const k = ti - delay;
+        if (k > 0 && k < 0.45) {
+          ctx.strokeStyle = `rgba(255,255,255,${1 - k / 0.45})`; ctx.lineWidth = cell * 0.25 * (1 - k / 0.45) + 1;
+          ctx.beginPath(); ctx.ellipse(bx, by, cell * (0.8 + k * speed), cell * (0.6 + k * speed * 0.75), 0, 0, 7); ctx.stroke();
+        }
+      }
+      for (const p of sparks) {
+        ctx.fillStyle = p.c;
+        ctx.fillRect(p.x * cell - cell * 0.12, p.y * cell - cell * 0.12, cell * 0.24, cell * 0.24);
+      }
+      if (ti < 0.12) { ctx.fillStyle = `rgba(255,255,255,${0.6 * (1 - ti / 0.12)})`; ctx.fillRect(0, 0, COLS * cell, ROWS * cell); }
+      // comic "SLAM!" burst
+      const pop = Math.min(1, ti / 0.08) * (1 + Math.max(0, 0.25 - ti) * 1.2);
+      const sx = Math.min(Math.max(bx, cell * 3), COLS * cell - cell * 3), sy = by > cell * 5.5 ? by - cell * 3.6 : by + cell * 3.6; // above the hand, or below near the top
+      ctx.save();
+      ctx.translate(sx, sy); ctx.rotate(-0.15); ctx.scale(pop, pop);
+      ctx.beginPath();
+      for (let i = 0; i < 24; i++) {
+        const a = i / 24 * Math.PI * 2, rad = (i % 2 ? 1.2 : 1.9) * cell;
+        ctx.lineTo(Math.cos(a) * rad * 1.35, Math.sin(a) * rad);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#ffd23f'; ctx.fill();
+      ctx.strokeStyle = '#b3261e'; ctx.lineWidth = cell * 0.12; ctx.stroke();
+      ctx.fillStyle = '#d7261e'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `900 ${cell * 1.05}px system-ui, sans-serif`;
+      ctx.fillText('SLAM!', 0, cell * 0.05);
+      ctx.restore();
+      ctx.textBaseline = 'alphabetic';
     }
   }
 
@@ -411,7 +582,8 @@
       const k = +b.dataset.k;
       b.classList.toggle('forbidden', k === forbidden);
       b.classList.toggle('warn', warn && k === forbidden);
-      b.querySelector('small').textContent = k === forbidden ? `+${GROW_PENALTY}` : '↑→↓←'[k];
+      b.classList.toggle('off', k === offKey);
+      b.querySelector('small').textContent = k === offKey ? 'OFF' : k === forbidden ? `+${GROW_PENALTY}` : '↑→↓←'[k];
     }
   }
 
