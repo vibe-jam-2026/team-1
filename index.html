@@ -93,6 +93,7 @@
   </div>
 </div>
 <script src="boss.js"></script>
+<script src="maze.js"></script>
 <script>
 (() => {
   // ---- Tunables (we will iterate on these) ----
@@ -116,7 +117,7 @@
   const T_REACH = 0.45, T_WIND = 0.75, T_SLAM = 0.83, ARM_TIME = 1.5;
   const RICK_TIME = 0.6;       // short pause while the video starts, then play resumes on top of it
   const BLUE_CHANCE = 0.35;    // chance a button is the blue one, which starts the boss fight
-  const BOSS_WIN_POINTS = 25;
+  const BOSS_WIN_POINTS = 100; // for beating both bosses (and not pressing the final button)
   const HIT_PAUSE = 1.2;       // freeze after a hit
   // Power-ups: bomb, shield, scissors. Some of them are traps.
   const PU_EVERY = () => 5 + Math.random() * 5; // seconds until the next power-up
@@ -456,12 +457,13 @@
       if (result === 'win') {
         score += BOSS_WIN_POINTS;
         if (score > best) { best = score; try { localStorage.setItem('snakeDodgeBest', best); } catch (e) {} }
-        popup(snake[0].x + 0.5, snake[0].y + 0.5, `BOSS DEFEATED +${BOSS_WIN_POINTS}`, '#5ee07a');
+        popup(snake[0].x + 0.5, snake[0].y + 0.5, `TRUE VICTORY +${BOSS_WIN_POINTS}`, '#5ee07a');
       } else {
         score = 0;
-        popup(snake[0].x + 0.5, snake[0].y + 0.5, 'SCORE RESET', '#ff5a4e');
+        popup(snake[0].x + 0.5, snake[0].y + 0.5, result === 'pressed' ? 'YOU PRESSED IT' : 'SCORE RESET', '#ff5a4e');
       }
       state = 'ready';
+      if (result === 'pressed') startRoll(); // of course it was a rickroll
     });
   }
 

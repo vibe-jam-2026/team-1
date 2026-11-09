@@ -1,6 +1,6 @@
 // Boss fight: a small side-scroller against Rick, the final boss.
 // The snake game starts it when the blue button is slammed:
-//   BossFight.start(result => ...)   result is 'win' or 'lose'
+//   BossFight.start(result => ...)   result is 'win' or 'lose' (or, once the maze level takes over, 'pressed')
 // Controls: A/D (or arrows) move, W jumps, S or Space slams (or fires a rocket when you have the launcher).
 (() => {
   // ---- Tunables ----
@@ -17,12 +17,32 @@
   const PLAYER_TL = { reach: 0.14, wind: 0.28, slam: 0.34, hold: 0.45, end: 0.58 };
   const RICK_TL = { reach: 0.3, wind: 1.05, slam: 1.15, hold: 1.55, end: 1.9 };
 
+  // Rick's head, centred on the face and looking right. Shared with the maze level (maze.js).
+  // mood: 'normal' | 'hurt' | 'dizzy'
+  function drawRickHead(c, mood = 'normal') {
+    c.fillStyle = '#f2c7a0'; c.beginPath(); c.ellipse(0, 0, 17, 20, 0, 0, 7); c.fill();
+    c.fillStyle = '#d9692b'; c.strokeStyle = '#a3471a'; c.lineWidth = 2;
+    c.beginPath();
+    c.moveTo(-18, 5); c.quadraticCurveTo(-25, -21, -7, -31);
+    c.quadraticCurveTo(15, -41, 27, -25); c.quadraticCurveTo(23, -17, 13, -16);
+    c.quadraticCurveTo(1, -17, -5, -9); c.quadraticCurveTo(-9, -1, -12, 9); c.closePath();
+    c.fill(); c.stroke();
+    c.fillStyle = '#1b1b22';
+    if (mood === 'dizzy') { c.font = '700 12px system-ui'; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillText('x', 8, 1); }
+    else { c.beginPath(); c.arc(8, -2, 2.4, 0, 7); c.fill(); }
+    c.strokeStyle = '#7a3a17'; c.lineWidth = 2; c.beginPath(); c.moveTo(3, -9); c.lineTo(12, -10); c.stroke();
+    c.strokeStyle = '#9b4a3a';
+    c.beginPath(); if (mood !== 'normal') c.arc(7, 15, 4, Math.PI * 1.1, Math.PI * 1.9); else c.arc(6, 8, 6, 0.2, 1.3); c.stroke();
+  }
+  window.RickHead = drawRickHead;
+
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const clamp01 = t => clamp(t, 0, 1);
   const ease = t => 1 - Math.pow(1 - t, 3);
   const pick = a => a[Math.floor(Math.random() * a.length)];
 
   let root, cv, ctx, raf, last, onDone, beatTimer, actx;
+  let rhead, minis, handedOff; // the head-pop transition into the maze level
   let keys, P, R, cam, shake, bonuses, rockets, fx, texts, rickSlam, phase, phaseT, bonusTimer, flash, ended;
 
   // ---- Sound ----
@@ -104,20 +124,36 @@
     cam = { x: 0 }; shake = 0; flash = 0;
     bonuses = []; rockets = []; fx = []; texts = []; rickSlam = null;
     phase = 'intro'; phaseT = 0; bonusTimer = 3;
+    rhead = null; minis = null; handedOff = false;
     startBeat();
     last = performance.now();
     raf = requestAnimationFrame(frame);
   }
 
   function finish() {
-    if (ended || phaseT < 1.2) return;
+    const lose = phase === 'lose';
+    if (ended || phaseT < (lose ? 0.6 : 1.2)) return;
     ended = true;
-    cancelAnimationFrame(raf); clearInterval(beatTimer);
+    clearInterval(beatTimer);
     removeEventListener('keydown', onKey, true);
     removeEventListener('keyup', onKey, true);
     removeEventListener('resize', resize);
-    root.remove();
-    onDone && onDone(phase === 'win' ? 'win' : 'lose');
+    const close = () => { cancelAnimationFrame(raf); root.remove(); };
+    onDone && onDone(lose ? 'lose' : 'win');
+    if (!lose || !root.animate) return close();
+    // Lost: the boss stage closes in a shrinking circle around the fallen snake,
+    // revealing the snake game underneath, which is already waiting.
+    const r = cv.getBoundingClientRect(), sc = r.width / W;
+    const cx = r.left + (P.x - cam.x) * sc, cy = r.top + (P.y - 20) * sc;
+    root.style.background = 'transparent';
+    const anim = root.animate([
+      { clipPath: `circle(150vmax at ${cx}px ${cy}px)` },
+      { clipPath: `circle(70px at ${cx}px ${cy}px)`, offset: 0.55 },
+      { clipPath: `circle(70px at ${cx}px ${cy}px)`, offset: 0.7 },
+      { clipPath: `circle(0px at ${cx}px ${cy}px)` },
+    ], { duration: 1400, easing: 'ease-in-out', fill: 'forwards' });
+    anim.onfinish = close;
+    beep(500, 0.15, 'triangle', 0.05); setTimeout(() => beep(330, 0.2, 'triangle', 0.05), 150); setTimeout(() => beep(196, 0.4, 'triangle', 0.05), 320);
   }
 
   function resize() {
@@ -224,6 +260,11 @@
     popText(R.x, R.y - 220, `-${dmg}`, '#ffd23f', 34);
     burst(R.x, R.y - 120, 16, ['#ffd23f', '#fff', '#d9692b'], 350);
     beep(880, 0.08, 'square', 0.06);
+    if (R.hp <= 0 && window.MazeFight) { // on to the FINAL final boss
+      R.st = 'decap'; rickSlam = null; phase = 'decap'; phaseT = 0; rockets = []; bonuses = [];
+      say('Wait... what?!');
+      return;
+    }
     if (R.hp <= 0) {
       R.st = 'down'; R.downT = 0; rickSlam = null; phase = 'win'; phaseT = 0;
       say('Never gonna give... ugh');
@@ -300,6 +341,59 @@
     }
   }
 
+  // ---- Rick loses his head: it pops off, bounces, and bursts into mini heads that roll away ----
+  const POP_AT = 1.0, HANDOFF_AT = 5.2;
+  function updateDecap(dt) {
+    const t = phaseT;
+    R.t += dt * 0.6; // the body keeps dancing, a bit slower
+    if (R.sayT > 0) R.sayT -= dt;
+    if (R.hurtT > 0) R.hurtT -= dt;
+    if (!rhead && !minis && t > POP_AT) {
+      R.headless = true;
+      rhead = { x: R.x + R.face * 3, y: R.y - 175, vx: -R.face * 90, vy: -720, rot: 0, vr: 9 * R.face, bounces: 0 };
+      shake = Math.max(shake, 8);
+      beep(900, 0.06, 'square', 0.07); setTimeout(() => beep(1500, 0.08, 'square', 0.06), 40);
+      burst(rhead.x, rhead.y, 16, ['#fff', '#ffd23f'], 300);
+      popText(rhead.x, rhead.y - 40, 'POP!', '#fff', 40);
+    }
+    if (rhead) {
+      rhead.vy += 1500 * dt; rhead.x += rhead.vx * dt; rhead.y += rhead.vy * dt; rhead.rot += rhead.vr * dt;
+      if (rhead.y >= GY - 20 && rhead.vy > 0) {
+        rhead.y = GY - 20; rhead.vy *= -0.5; rhead.bounces++; thud(0.4); shake = Math.max(shake, 5);
+        if (rhead.bounces >= 2) split();
+      }
+    }
+    if (minis) for (const m of minis) {
+      m.vy += 1500 * dt; m.x += m.vx * dt; m.y += m.vy * dt;
+      if (m.y >= GY - 9 && m.vy > 0) { m.y = GY - 9; m.vy *= -0.4; }
+      m.rot += m.vx * dt / 9; // rolling
+    }
+    if (t > HANDOFF_AT) handOff();
+  }
+  function split() {
+    const x = rhead.x, y = rhead.y;
+    rhead = null;
+    minis = [];
+    for (let i = 0; i < 8; i++) {
+      const side = i % 2 ? 1 : -1;
+      minis.push({ x, y, vx: side * (140 + Math.random() * 320), vy: -250 - Math.random() * 450, rot: 0 });
+    }
+    thud(0.9); shake = Math.max(shake, 14);
+    burst(x, y, 40, ['#ddd', '#aaa', '#fff', '#d9692b'], 380, 0.9);
+    beep(200, 0.4, 'sawtooth', 0.07);
+  }
+  // Hand over to the maze level once the screen has faded to black.
+  function handOff() {
+    if (handedOff) return;
+    handedOff = true; ended = true;
+    clearInterval(beatTimer);
+    removeEventListener('keydown', onKey, true);
+    removeEventListener('keyup', onKey, true);
+    removeEventListener('resize', resize);
+    window.MazeFight.start(onDone);
+    setTimeout(() => { cancelAnimationFrame(raf); root.remove(); }, 60);
+  }
+
   // ---- Rockets and bonuses ----
   function updateRockets(dt) {
     for (const r of rockets) {
@@ -348,7 +442,9 @@
     const dt = Math.min(0.033, (now - last) / 1000); last = now;
     phaseT += dt;
     if (phase === 'intro' && phaseT > 2.4) { phase = 'fight'; phaseT = 0; }
-    if (phase === 'fight' || phase === 'win' || phase === 'lose') {
+    if (phase === 'lose' && phaseT > 2) finish(); // no key needed: straight back to the snake
+    if (phase === 'decap') { updatePlayer(dt); updateDecap(dt); }
+    else if (phase === 'fight' || phase === 'win' || phase === 'lose') {
       updatePlayer(dt);
       if (phase !== 'lose') updateRick(dt); else R.t += dt;
       updateRockets(dt);
@@ -374,9 +470,11 @@
     ctx.translate(-Math.round(cam.x) + sx, sy);
     drawStage();
     for (const b of bonuses) drawBonus(b);
-    if (rickSlam) drawButton(rickSlam.tx, rickSlam.ty, 62, rickSlam.t >= RICK_TL.slam, true, clamp01(rickSlam.t / 0.25));
-    if (P.slam) drawButton(P.slam.tx, P.slam.ty, P.slam.mega ? 34 : 22, P.slam.t >= PLAYER_TL.slam, false, clamp01(P.slam.t / 0.08));
+    if (rickSlam) drawMarker(rickSlam.tx, rickSlam.ty, 125, rickSlam.t, RICK_TL, '255,70,60');
+    if (P.slam) drawMarker(P.slam.tx, P.slam.ty, P.slam.mega ? 115 : 72, P.slam.t, PLAYER_TL, '120,255,140');
     drawRick();
+    if (rhead) { ctx.save(); ctx.translate(rhead.x, rhead.y); ctx.rotate(rhead.rot); ctx.scale(R.face, 1); drawRickHead(ctx, 'hurt'); ctx.restore(); }
+    if (minis) for (const m of minis) { ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.rot); ctx.scale(0.45, 0.45); drawRickHead(ctx, 'normal'); ctx.restore(); }
     drawPlayer();
     for (const r of rockets) drawRocket(r);
     if (rickSlam) drawRickSlam();
@@ -453,20 +551,30 @@
     }
   }
 
-  // A red arcade button on the ground, seen from the side. pop: 0..1 grow-in.
-  function drawButton(x, y, r, pressed, sign, pop) {
-    ctx.save(); ctx.translate(x, y); ctx.scale(pop, pop);
-    ctx.fillStyle = 'rgba(255,60,50,.25)'; ctx.beginPath(); ctx.ellipse(0, -4, r * 1.6, r * 0.5, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = '#2b2f38'; ctx.beginPath(); ctx.roundRect(-r, -r * 0.4, r * 2, r * 0.4, r * 0.15); ctx.fill();
-    ctx.fillStyle = pressed ? '#a8201a' : '#ff3b30';
-    ctx.beginPath(); ctx.ellipse(0, -r * 0.4, r * 0.75, pressed ? r * 0.18 : r * 0.55, 0, Math.PI, 0); ctx.fill();
-    if (!pressed) { ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 0.7, r * 0.15, r * 0.09, -0.3, 0, 7); ctx.fill(); }
-    if (sign) {
-      const fs = 16; ctx.font = `800 ${fs}px system-ui, sans-serif`;
-      const tw = ctx.measureText("DON'T PRESS").width + 16;
-      ctx.fillStyle = 'rgba(15,17,22,.9)'; ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.roundRect(-tw / 2, 10, tw, 26, 8); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText("DON'T PRESS", 0, 24);
+  // A target marker on the floor showing where a hand is about to land (radius = how far the hit reaches).
+  // It pulses faster as the slam gets closer, and fades out after the impact.
+  function drawMarker(x, y, radius, t, tl, rgb) {
+    const pop = ease(clamp01(t / 0.15));
+    const fade = t < tl.slam ? 1 : 1 - clamp01((t - tl.slam) / 0.3);
+    if (fade <= 0) return;
+    const k = clamp01(t / tl.slam), pulse = 0.5 + 0.5 * Math.sin(t * (8 + k * 30));
+    const rx = radius * pop, ry = radius * 0.16 * pop;
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = `rgba(${rgb},${0.12 + k * 0.18})`;
+    ctx.beginPath(); ctx.ellipse(x, y + 2, rx, ry, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = `rgba(${rgb},${0.6 + pulse * 0.4})`; ctx.lineWidth = 3;
+    ctx.setLineDash([14, 9]); ctx.lineDashOffset = -t * 60;
+    ctx.beginPath(); ctx.ellipse(x, y + 2, rx, ry, 0, 0, 7); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.ellipse(x, y + 2, rx * 0.35, ry * 0.35, 0, 0, 7); ctx.stroke();
+    ctx.beginPath(); // crosshair
+    ctx.moveTo(x - rx * 0.6, y + 2); ctx.lineTo(x - rx * 0.15, y + 2); ctx.moveTo(x + rx * 0.15, y + 2); ctx.lineTo(x + rx * 0.6, y + 2);
+    ctx.stroke();
+    if (t < tl.slam) { // bobbing arrow above the spot
+      const ay = y - 34 - Math.abs(Math.sin(t * 7)) * 10, s = radius > 100 ? 14 : 10;
+      ctx.fillStyle = `rgba(${rgb},${0.7 + pulse * 0.3})`;
+      ctx.beginPath(); ctx.moveTo(x - s, ay - s); ctx.lineTo(x + s, ay - s); ctx.lineTo(x, ay); ctx.closePath(); ctx.fill();
     }
     ctx.restore();
   }
@@ -530,7 +638,6 @@
       const k = clamp01(s.t / RICK_TL.slam);
       ctx.fillStyle = `rgba(0,0,0,${0.2 + k * 0.35})`;
       ctx.beginPath(); ctx.ellipse(s.tx, s.ty + 4, 125 * (0.5 + k * 0.5), 18, 0, 0, 7); ctx.fill();
-      if (Math.floor(s.t * 8) % 2) { ctx.strokeStyle = 'rgba(255,60,50,.8)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(s.tx, s.ty + 4, 125, 20, 0, 0, 7); ctx.stroke(); }
     }
     drawArmAndHand(ox, oy, pose, 170, '#2b2b33', '#121217', '#f2c7a0', '#a0704f', Math.sign(s.tx - R.x) || 1, 30, 0.25);
     const ti = s.t - RICK_TL.slam;
@@ -581,7 +688,7 @@
   // Rick: a cartoon pop star in a long dark coat with a big ginger quiff, always dancing.
   function drawRick() {
     if (R.hurtT > 0 && Math.floor(R.hurtT * 20) % 2) return;
-    const t = R.t, dancing = R.st === 'dance' || R.st === 'flee' || R.st === 'hurt' || phase === 'intro';
+    const t = R.t, dancing = R.st === 'dance' || R.st === 'flee' || R.st === 'hurt' || R.st === 'decap' || phase === 'intro';
     const sp = R.st === 'flee' ? 9 : 6;
     const bob = dancing ? Math.abs(Math.sin(t * sp)) * 7 : 0, step = dancing ? Math.sin(t * sp) : 0;
     ctx.save();
@@ -615,23 +722,15 @@
       ctx.beginPath(); ctx.moveTo(sx, -146); ctx.lineTo(elbow[0], elbow[1]); ctx.lineTo(hand[0], hand[1]); ctx.stroke();
       ctx.fillStyle = '#f2c7a0'; ctx.beginPath(); ctx.arc(hand[0], hand[1], 6, 0, 7); ctx.fill();
     });
-    // head
-    ctx.fillStyle = '#f2c7a0'; ctx.fillRect(-5, -160, 10, 10);
-    ctx.beginPath(); ctx.ellipse(3, -175, 17, 20, 0, 0, 7); ctx.fill();
-    // the quiff
-    ctx.fillStyle = '#d9692b'; ctx.strokeStyle = '#a3471a'; ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-15, -170); ctx.quadraticCurveTo(-22, -196, -4, -206);
-    ctx.quadraticCurveTo(18, -216, 30, -200); ctx.quadraticCurveTo(26, -192, 16, -191);
-    ctx.quadraticCurveTo(4, -192, -2, -184); ctx.quadraticCurveTo(-6, -176, -9, -166); ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    // face
-    ctx.fillStyle = '#1b1b22';
-    if (R.st === 'dizzy' || R.st === 'down') { ctx.font = '700 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('x', 11, -174); }
-    else { ctx.beginPath(); ctx.arc(11, -177, 2.4, 0, 7); ctx.fill(); }
-    ctx.strokeStyle = '#7a3a17'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(6, -184); ctx.lineTo(15, -185); ctx.stroke();
-    ctx.strokeStyle = '#9b4a3a'; ctx.lineWidth = 2;
-    ctx.beginPath(); if (R.hurtT > 0 || R.st === 'down') ctx.arc(10, -160, 4, Math.PI * 1.1, Math.PI * 1.9); else ctx.arc(9, -167, 6, 0.2, 1.3); ctx.stroke();
+    // neck and head (gone once it has popped off)
+    if (!R.headless) {
+      ctx.fillStyle = '#f2c7a0'; ctx.fillRect(-5, -160, 10, 10);
+      ctx.save(); ctx.translate(3, -175);
+      drawRickHead(ctx, R.st === 'dizzy' || R.st === 'down' ? 'dizzy' : R.hurtT > 0 || R.st === 'decap' ? 'hurt' : 'normal');
+      ctx.restore();
+    } else { // a tidy collar where the head used to be
+      ctx.fillStyle = '#f4f4f4'; ctx.beginPath(); ctx.ellipse(0, -153, 11, 4, 0, 0, 7); ctx.fill();
+    }
     ctx.restore();
     // dizzy stars
     if (R.st === 'dizzy') {
@@ -733,14 +832,28 @@
       ctx.fillText('Slam Rick before he slams you', 0, 50);
       ctx.restore();
     }
+    if (phase === 'decap' && minis) {
+      const k = phaseT - POP_AT - 1.0;
+      const s = 0.8 + 0.2 * ease(clamp01(k / 0.4));
+      ctx.save(); ctx.translate(W / 2, H * 0.3); ctx.scale(s, s); ctx.rotate(Math.sin(phaseT * 20) * 0.02);
+      ctx.globalAlpha = clamp01(k / 0.3);
+      ctx.textAlign = 'center'; ctx.font = '900 60px system-ui, sans-serif';
+      ctx.lineWidth = 8; ctx.strokeStyle = '#120818'; ctx.strokeText('THE FINAL FINAL BOSS', 0, 0);
+      ctx.fillStyle = '#ff3b30'; ctx.fillText('THE FINAL FINAL BOSS', 0, 0);
+      ctx.font = '700 22px system-ui, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText("It's not over. It's never over.", 0, 44);
+      ctx.restore();
+    }
+    if (phase === 'decap' && phaseT > HANDOFF_AT - 1) { // fade to black before the maze
+      ctx.fillStyle = `rgba(0,0,0,${clamp01((phaseT - (HANDOFF_AT - 1)) / 0.9)})`; ctx.fillRect(0, 0, W, H);
+    }
     if (phase === 'win' || phase === 'lose') {
       const win = phase === 'win';
       ctx.fillStyle = `rgba(7,4,13,${0.5 * clamp01(phaseT)})`; ctx.fillRect(0, 0, W, H);
       ctx.textAlign = 'center'; ctx.fillStyle = win ? '#5ee07a' : '#ff3b30'; ctx.font = '900 58px system-ui, sans-serif';
       ctx.fillText(win ? 'RICK DEFEATED!' : 'YOU GOT SLAMMED', W / 2, H * 0.38);
       ctx.fillStyle = '#fff'; ctx.font = '700 22px system-ui, sans-serif';
-      ctx.fillText(win ? 'He gave you up. +25 points' : 'Rick wins. Back to the snake.', W / 2, H * 0.38 + 46);
-      if (phaseT > 1.2) { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '16px system-ui, sans-serif'; ctx.fillText('Press any key or tap to continue', W / 2, H * 0.38 + 86); }
+      ctx.fillText(win ? 'He gave you up.' : 'Rick wins. Back to the snake.', W / 2, H * 0.38 + 46);
+      if (win && phaseT > 1.2) { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '16px system-ui, sans-serif'; ctx.fillText('Press any key or tap to continue', W / 2, H * 0.38 + 86); }
     }
   }
 
