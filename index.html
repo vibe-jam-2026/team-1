@@ -25,6 +25,11 @@
   .app { position: relative; z-index: 1; height: 100%; display: flex; align-items: center; justify-content: center; padding: 12px 16px; gap: 24px; }
   .side { width: 232px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 22px; }
   .help { text-align: center; }
+  .legend { font-size: 13px; color: var(--mut); display: grid; gap: 4px; }
+  .legend b { color: var(--ink); font-weight: 600; }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; }
+  .legend .trap { color: var(--bad); font-style: italic; padding-left: 16px; }
+  @media (max-width: 760px) { .legend { display: none; } }
   @media (max-width: 760px) {
     .app { flex-direction: column; justify-content: flex-start; gap: 10px; }
     .side { display: contents; }
@@ -78,6 +83,12 @@
     <button data-k="2" aria-label="Down">S<small>↓</small></button>
     <button data-k="1" aria-label="Right">D<small>→</small></button>
   </div>
+  <div class="legend">
+    <div><i style="background:#ff8a3d"></i><b>Bomb</b> clears all obstacles</div>
+    <div><i style="background:#46d4ff"></i><b>Shield</b> makes you invincible</div>
+    <div><i style="background:#c9a7ff"></i><b>Scissors</b> cut the snake in half</div>
+    <div class="trap">…unless it's a trap</div>
+  </div>
   <div class="help">W A S D or arrow keys to steer<br>P to pause · <a href="instructions.html">instructions</a></div>
   </div>
 </div>
@@ -86,7 +97,10 @@
   // ---- Tunables (we will iterate on these) ----
   const COLS = 36, ROWS = 24;
   const START_LEN = 4;
-  const GROW_PENALTY = 3;      // segments added when pressing the forbidden key
+  // Pressing the red key gives a random punishment: grow, speed up or slow down.
+  const GROW_PENALTY = 3;      // segments added
+  const FAST_TIME = 3, SLOW_TIME = 3;  // seconds of extra speed / slowness
+  const FAST_FACTOR = 0.55, SLOW_FACTOR = 1.9; // step time multipliers
   const MOVE_TIME = 0.14;      // seconds per snake step
   // The forbidden key comes and goes: a while with every key safe, then one key is red for a moment.
   const SAFE_TIME = () => 4 + Math.random() * 2;      // seconds with no forbidden key (about 5)
@@ -101,6 +115,12 @@
   const T_REACH = 0.45, T_WIND = 0.75, T_SLAM = 0.83, ARM_TIME = 1.5;
   const RICK_TIME = 2;         // freeze with the banner before play resumes on top of the video
   const HIT_PAUSE = 1.2;       // freeze after a hit
+  // Power-ups: bomb, shield, scissors. Some of them are traps.
+  const PU_EVERY = () => 5 + Math.random() * 5; // seconds until the next power-up
+  const PU_LIFE = 9, PU_MAX = 2;   // seconds one stays on the board; how many at once
+  const TRAP_CHANCE = 0.2;         // chance a power-up backfires
+  const SHIELD_TIME = 5, TURBO_TIME = 4, TRAP_GROW = 4;
+  const PU_COLOR = { bomb: '#ff8a3d', shield: '#46d4ff', scissors: '#c9a7ff' };
 
   // Directions (also the key ids): 0 up/W, 1 right/D, 2 down/S, 3 left/A.
   const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
@@ -115,12 +135,19 @@
 
   let snake, dir, turns, grow, obstacles, score, state, moveAcc, spawnAcc, elapsed;
   let forbidden = -1, swapTimer = 0; // forbidden: the red key right now (-1 = none)
+  // Each time a key turns red it gets ONE punishment, picked at random (never the same as last time):
+  // 0 = grow, 1 = speed up, 2 = slow down. The red button shows which one.
+  let effect = 0;
+  const EFFECT_LABEL = [`+${GROW_PENALTY}`, 'FAST', 'SLOW'];
   let hitTimer = 0, penaltyFlash = 0, hitMsg = '';
+  let items = [], puTimer = 0, shieldT = 0, turboT = 0, slowT = 0, bombFlash = 0;
+  let fx = [], debris = [], popups = [], snip = null; // particles, cut-off tail pieces, floating texts, scissors animation
   let offKey = -1, offTimer = 0; // offKey: the key that is switched off right now (-1 = none)
   let rb = null, rbTimer = 0, armT = 0, rickT = 0, sparks = [];
   function toggleForbidden() {
     if (forbidden >= 0) { forbidden = -1; swapTimer = SAFE_TIME(); return; }
     do forbidden = Math.floor(Math.random() * 4); while (forbidden === offKey);
+    effect = (effect + 1 + Math.floor(Math.random() * 2)) % 3; // a different effect than last time
     swapTimer = FORBID_TIME();
     beep(880, 0.12, 'triangle', 0.08);
   }
@@ -134,6 +161,8 @@
     forbidden = -1; swapTimer = SAFE_TIME(); // every key is safe at the start
     offKey = -1; offTimer = OFF_EVERY();
     rb = null; rbTimer = 3 + Math.random() * 3;
+    items = []; puTimer = 2 + Math.random() * 3; shieldT = 0; turboT = 0; slowT = 0;
+    debris = []; snip = null;
     state = 'ready';
   }
 
@@ -203,11 +232,27 @@
       return;
     }
     if (k === forbidden) {
-      grow += GROW_PENALTY; penaltyFlash = 0.35;
-      beep(140, 0.18, 'sawtooth', 0.08); // it still steers, but you pay for it
+      punish(); // it still steers, but you pay for it
     } else beep(520, 0.03, 'square', 0.03);
     const lastDir = turns.length ? turns[turns.length - 1] : dir;
     if (k !== lastDir && k !== (lastDir + 2) % 4 && turns.length < 2) turns.push(k);
+  }
+  function punish() {
+    const h = snake[0], x = h.x + 0.5, y = h.y + 0.5, roll = effect;
+    penaltyFlash = 0.35;
+    if (roll === 0) {
+      grow += GROW_PENALTY;
+      beep(140, 0.18, 'sawtooth', 0.08);
+      popup(x, y, `+${GROW_PENALTY} LENGTH`, '#ff5a4e');
+    } else if (roll === 1) {
+      turboT = FAST_TIME; slowT = 0;
+      beep(300, 0.08, 'sawtooth', 0.07); setTimeout(() => beep(700, 0.12, 'sawtooth', 0.07), 70);
+      popup(x, y, 'SPEED UP!', '#ff9f43');
+    } else {
+      slowT = SLOW_TIME; turboT = 0;
+      beep(400, 0.12, 'sawtooth', 0.07); setTimeout(() => beep(150, 0.25, 'sawtooth', 0.07), 100);
+      popup(x, y, 'SLOW DOWN!', '#7aa2ff');
+    }
   }
   const KEYMAP = { w: 0, arrowup: 0, d: 1, arrowright: 1, s: 2, arrowdown: 2, a: 3, arrowleft: 3 };
   addEventListener('keydown', e => {
@@ -236,12 +281,100 @@
 
   function step() {
     if (turns.length) dir = turns.shift();
-    const h = snake[0], nx = h.x + DIRS[dir][0], ny = h.y + DIRS[dir][1];
-    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return hit('Hit the wall');
+    const h = snake[0];
+    let nx = h.x + DIRS[dir][0], ny = h.y + DIRS[dir][1];
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) {
+      if (shieldT <= 0) return hit('Hit the wall');
+      nx = (nx + COLS) % COLS; ny = (ny + ROWS) % ROWS; // shielded: pass through to the other side
+    }
     const body = grow > 0 ? snake : snake.slice(0, -1);
-    if (body.some(s => s.x === nx && s.y === ny)) return hit('Bit yourself');
+    if (shieldT <= 0 && body.some(s => s.x === nx && s.y === ny)) return hit('Bit yourself');
     snake.unshift({ x: nx, y: ny });
     if (grow > 0) grow--; else snake.pop();
+    const it = items.find(i => i.x === nx && i.y === ny);
+    if (it) pickup(it);
+  }
+
+  // ---- Power-ups ----
+  function burst(x, y, n, colors, speed = 8) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, v = speed * (0.4 + Math.random() * 0.8), life = 0.35 + Math.random() * 0.45;
+      fx.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life, c: colors[i % colors.length] });
+    }
+  }
+  function popup(x, y, text, c) { popups.push({ x, y, text, c, life: 1.2 }); }
+
+  function spawnItem() {
+    const types = ['bomb', 'shield', 'scissors'], h = snake[0];
+    for (let tries = 0; tries < 60; tries++) {
+      const x = 1 + Math.floor(Math.random() * (COLS - 2)), y = 1 + Math.floor(Math.random() * (ROWS - 2));
+      if (Math.abs(x - h.x) + Math.abs(y - h.y) < 4) continue;
+      if (snake.some(s => s.x === x && s.y === y) || items.some(i => i.x === x && i.y === y)) continue;
+      items.push({ type: types[Math.floor(Math.random() * 3)], x, y, life: PU_LIFE, t: Math.random() * 6, trap: Math.random() < TRAP_CHANCE });
+      return;
+    }
+  }
+
+  function pickup(it) {
+    items = items.filter(i => i !== it);
+    const x = it.x + 0.5, y = it.y + 0.5;
+    burst(x, y, 12, [PU_COLOR[it.type], '#fff'], 6);
+    if (it.type === 'bomb') {
+      if (!it.trap) {
+        for (const o of obstacles) burst(o.x + o.w / 2, o.y + 0.5, 6 + o.w * 4, ['#ffb838', '#ff5a1f', '#fff', '#555'], 10);
+        obstacles = []; bombFlash = 0.3; thud();
+        popup(x, y, 'BOOM!', '#ffb838');
+      } else { // dud: it calls in an obstacle rain instead
+        for (let i = 0; i < 9; i++) {
+          const w = 1 + Math.floor(Math.random() * 3);
+          obstacles.push({ x: Math.floor(Math.random() * (COLS - w + 1)), y: -1 - Math.random() * 4, w, v: 4 + Math.random() * 3 });
+        }
+        beep(110, 0.35, 'sawtooth', 0.08);
+        popup(x, y, 'DUD! INCOMING!', '#ff5a4e');
+      }
+    } else if (it.type === 'shield') {
+      if (!it.trap) {
+        shieldT = SHIELD_TIME; turboT = 0;
+        beep(660, 0.08, 'triangle', 0.08); setTimeout(() => beep(990, 0.12, 'triangle', 0.08), 80);
+        popup(x, y, 'SHIELD!', '#46d4ff');
+      } else { // fake shield: the snake goes into turbo
+        turboT = TURBO_TIME; slowT = 0;
+        beep(300, 0.1, 'sawtooth', 0.07); setTimeout(() => beep(600, 0.15, 'sawtooth', 0.07), 90);
+        popup(x, y, 'TRAP! TURBO!', '#ff5a4e');
+      }
+    } else if (it.type === 'scissors') {
+      if (!it.trap) {
+        const keep = Math.max(3, Math.ceil(snake.length / 2));
+        grow = 0;
+        if (snake.length > keep) {
+          const a = snake[keep - 1], b = snake[keep];
+          snip = { x: (a.x + b.x) / 2 + 0.5, y: (a.y + b.y) / 2 + 0.5, ang: Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2, t: 0 };
+          // the cut-off part tumbles away a moment later, when the blades close
+          for (const sgm of snake.splice(keep)) debris.push({ x: sgm.x + 0.5, y: sgm.y + 0.5, vx: (Math.random() - 0.5) * 3,
+            vy: (Math.random() - 0.5) * 3, rot: 0, vr: (Math.random() - 0.5) * 10, life: 1.2, delay: 0.25 });
+        }
+        beep(1800, 0.04, 'square', 0.05); setTimeout(() => beep(2200, 0.04, 'square', 0.05), 120);
+        popup(x, y, 'SNIP!', '#c9a7ff');
+      } else { // glued: the snake grows instead
+        grow += TRAP_GROW; penaltyFlash = 0.5;
+        beep(140, 0.25, 'sawtooth', 0.08);
+        popup(x, y, `OOPS! GLUED +${TRAP_GROW}`, '#ff5a4e');
+      }
+    }
+  }
+
+  function updateEffects(dt) {
+    for (const p of fx) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.92; p.vy *= 0.92; p.life -= dt; }
+    fx = fx.filter(p => p.life > 0);
+    for (const d of debris) {
+      if (d.delay > 0) { d.delay -= dt; continue; }
+      d.x += d.vx * dt; d.y += d.vy * dt; d.rot += d.vr * dt; d.life -= dt;
+    }
+    debris = debris.filter(d => d.life > 0);
+    for (const p of popups) { p.y -= dt * 1.2; p.life -= dt; }
+    popups = popups.filter(p => p.life > 0);
+    if (snip && (snip.t += dt) > 0.6) snip = null;
+    if (bombFlash > 0) bombFlash -= dt;
   }
 
   function difficulty() { return Math.min(1, elapsed / 90); }
@@ -289,6 +422,7 @@
 
   function update(dt) {
     if (penaltyFlash > 0) penaltyFlash -= dt;
+    if (state !== 'paused') updateEffects(dt);
     if (state === 'hit') {
       hitTimer -= dt;
       if (hitTimer <= 0) reset();
@@ -321,8 +455,16 @@
     }
     if (swapTimer <= 0) toggleForbidden();
 
+    if (shieldT > 0) shieldT -= dt;
+    if (turboT > 0) turboT -= dt;
+    if (slowT > 0) slowT -= dt;
+    for (const it of items) { it.life -= dt; it.t += dt; }
+    items = items.filter(it => it.life > 0);
+    if ((puTimer -= dt) <= 0) { if (items.length < PU_MAX) spawnItem(); puTimer = PU_EVERY(); }
+
+    const moveTime = MOVE_TIME * (turboT > 0 ? FAST_FACTOR : slowT > 0 ? SLOW_FACTOR : 1);
     moveAcc += dt;
-    while (moveAcc >= MOVE_TIME && state === 'playing') { moveAcc -= MOVE_TIME; step(); }
+    while (moveAcc >= moveTime && state === 'playing') { moveAcc -= moveTime; step(); }
     if (state !== 'playing') return;
 
     spawnAcc -= dt;
@@ -332,7 +474,13 @@
     if (state !== 'playing') return;
 
     for (const o of obstacles) o.y += o.v * dt;
-    for (const o of obstacles) if (overlapsSnake(o)) return hit('Hit by an obstacle');
+    for (const o of obstacles) if (overlapsSnake(o)) {
+      if (shieldT <= 0) return hit('Hit by an obstacle');
+      o.dead = true; // it shatters on the shield
+      burst(o.x + o.w / 2, o.y + 0.5, 8 + o.w * 3, ['#ffb838', '#46d4ff', '#fff'], 9);
+      beep(900, 0.05, 'square', 0.04);
+    }
+    obstacles = obstacles.filter(o => !o.dead);
     const before = obstacles.length;
     obstacles = obstacles.filter(o => o.y < ROWS);
     const dodged = before - obstacles.length;
@@ -383,6 +531,9 @@
       ctx.fillRect(o.x * cell + 3, o.y * cell + cell * 0.65, o.w * cell - 6, 2);
     }
 
+    // power-ups
+    for (const it of items) if (it.life > 2 || Math.floor(it.life * 8) % 2) drawItem(it);
+
     // red button
     if (rb) {
       const pressed = state === 'arm' && armT >= T_SLAM;
@@ -412,6 +563,21 @@
       ctx.globalAlpha = 1;
     }
 
+    // cut-off tail pieces tumbling away
+    for (const d of debris) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, d.life / 0.8);
+      ctx.translate(d.x * cell, d.y * cell); ctx.rotate(d.rot); const k = 0.6 + 0.4 * Math.min(1, d.life / 1.2); ctx.scale(k, k);
+      ctx.fillStyle = '#3fbf5c'; rr(-cell / 2 + 2, -cell / 2 + 2, cell - 4, cell - 4, cell * 0.25);
+      ctx.restore();
+    }
+
+    // shield bubble around the whole snake (blinks when about to run out)
+    if (shieldT > 0 && (shieldT > 1.2 || Math.floor(shieldT * 10) % 2)) {
+      ctx.fillStyle = 'rgba(70,212,255,.28)';
+      for (const s of snake) rr(s.x * cell - cell * 0.18, s.y * cell - cell * 0.18, cell * 1.36, cell * 1.36, cell * 0.5);
+    }
+
     // snake
     const flash = penaltyFlash > 0 && Math.floor(penaltyFlash * 20) % 2 === 0;
     snake.forEach((s, i) => {
@@ -429,6 +595,66 @@
       ctx.arc(cx + dx * cell * 0.18 + -dy * sgn * cell * 0.2, cy + dy * cell * 0.18 + dx * sgn * cell * 0.2, Math.max(1.5, cell * 0.08), 0, 7);
       ctx.fill();
     }
+    if (turboT > 0) { // turbo speed lines behind the head
+      ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 2;
+      for (const o of [-0.3, 0, 0.3]) {
+        const l = cell * (0.8 + Math.random() * 0.8);
+        ctx.beginPath();
+        ctx.moveTo(cx - dx * cell * 0.7 - dy * o * cell, cy - dy * cell * 0.7 + dx * o * cell);
+        ctx.lineTo(cx - dx * (cell * 0.7 + l) - dy * o * cell, cy - dy * (cell * 0.7 + l) + dx * o * cell);
+        ctx.stroke();
+      }
+    }
+
+    // scissors snipping the snake
+    if (snip) {
+      const open = 0.55 * Math.abs(Math.cos(snip.t / 0.6 * Math.PI * 2)); // snip, snip
+      ctx.save();
+      ctx.translate(snip.x * cell, snip.y * cell); ctx.rotate(snip.ang);
+      const sc = cell * 3.2 * (1 + Math.max(0, 0.15 - snip.t) * 3); ctx.scale(sc, sc);
+      ctx.translate(-0.3, 0); // so the blades meet on the cut
+      drawScissors(open);
+      ctx.restore();
+      if (snip.t > 0.22 && snip.t < 0.4) { // the cut itself: a white slash across the snake
+        ctx.save();
+        ctx.translate(snip.x * cell, snip.y * cell); ctx.rotate(snip.ang);
+        ctx.strokeStyle = `rgba(255,255,255,${1 - (snip.t - 0.22) / 0.18})`; ctx.lineWidth = Math.max(2, cell * 0.12);
+        ctx.beginPath(); ctx.moveTo(-cell * 1.1, 0); ctx.lineTo(cell * 1.1, 0); ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // particles and floating texts
+    for (const p of fx) {
+      ctx.globalAlpha = Math.min(1, p.life / p.max * 1.5);
+      ctx.fillStyle = p.c;
+      ctx.fillRect(p.x * cell - cell * 0.1, p.y * cell - cell * 0.1, cell * 0.2, cell * 0.2);
+    }
+    ctx.globalAlpha = 1;
+    if (bombFlash > 0) { ctx.fillStyle = `rgba(255,200,120,${bombFlash * 1.6})`; ctx.fillRect(0, 0, W, H); }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const p of popups) {
+      ctx.globalAlpha = Math.min(1, p.life / 0.4);
+      ctx.font = `900 ${Math.max(14, cell * 0.85)}px system-ui, sans-serif`;
+      ctx.lineWidth = Math.max(3, cell * 0.15); ctx.strokeStyle = '#111'; ctx.strokeText(p.text, p.x * cell, p.y * cell - cell);
+      ctx.fillStyle = p.c; ctx.fillText(p.text, p.x * cell, p.y * cell - cell);
+    }
+    ctx.globalAlpha = 1; ctx.textBaseline = 'alphabetic';
+
+    // active effect timers in the corner
+    const status = [];
+    if (shieldT > 0) status.push(['SHIELD', shieldT, '#46d4ff']);
+    if (turboT > 0) status.push(['TURBO', turboT, '#ff9f43']);
+    if (slowT > 0) status.push(['SLOW', slowT, '#7aa2ff']);
+    status.forEach(([name, t, c], i) => {
+      const fs = Math.max(11, cell * 0.5), y = cell * 0.4 + i * fs * 1.9;
+      ctx.font = `800 ${fs}px system-ui, sans-serif`; ctx.textAlign = 'left';
+      const label = `${name} ${t.toFixed(1)}s`, w = ctx.measureText(label).width + fs;
+      ctx.fillStyle = 'rgba(10,12,16,.75)'; ctx.beginPath(); ctx.roundRect(cell * 0.4, y, w, fs * 1.6, fs * 0.5); ctx.fill();
+      ctx.fillStyle = c; ctx.textBaseline = 'middle'; ctx.fillText(label, cell * 0.4 + fs / 2, y + fs * 0.82);
+      ctx.textBaseline = 'alphabetic';
+    });
+
     // the arm and hand that slam the red button
     if (state === 'arm' && rb) drawArm(cx, cy);
     ctx.restore();
@@ -458,9 +684,60 @@
       ctx.fillText(msg[1], pad + W / 2, my + cell * 0.8);
       if (state === 'ready') {
         ctx.fillStyle = '#ff5a4e';
-        ctx.fillText(`When a key turns red, don't press it: it makes you grow`, pad + W / 2, my + cell * 2);
+        ctx.fillText(`Red key? Don't press it: you grow, speed up or slow down`, pad + W / 2, my + cell * 2);
       }
     }
+  }
+
+  // Power-up icons, drawn in units of one cell around (0, 0).
+  function drawScissors(open) {
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    for (const sgn of [-1, 1]) {
+      ctx.save();
+      ctx.rotate(sgn * open);
+      ctx.fillStyle = '#e6ebf2'; ctx.strokeStyle = '#4a5162'; ctx.lineWidth = 0.035;
+      ctx.beginPath(); ctx.moveTo(-0.02, -0.045 * sgn); ctx.lineTo(0.42, 0); ctx.lineTo(-0.02, 0.035 * sgn); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#e0505a'; ctx.lineWidth = 0.06;
+      ctx.beginPath(); ctx.moveTo(-0.02, 0); ctx.lineTo(-0.15, 0.05 * sgn); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(-0.24, 0.09 * sgn, 0.1, 0.075, 0.3 * sgn, 0, 7); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.fillStyle = '#4a5162'; ctx.beginPath(); ctx.arc(0, 0, 0.035, 0, 7); ctx.fill();
+  }
+
+  function drawItem(it) {
+    const px = (it.x + 0.5) * cell, py = (it.y + 0.5) * cell + Math.sin(it.t * 4) * cell * 0.06;
+    const glow = 0.25 + 0.1 * Math.sin(it.t * 6);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.fillStyle = PU_COLOR[it.type]; ctx.globalAlpha = glow;
+    ctx.beginPath(); ctx.arc(0, 0, cell * 0.85, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#10131a'; ctx.strokeStyle = PU_COLOR[it.type]; ctx.lineWidth = Math.max(1.5, cell * 0.07);
+    ctx.beginPath(); ctx.arc(0, 0, cell * 0.62, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.scale(cell * 1.5, cell * 1.5);
+    if (it.type === 'bomb') {
+      ctx.fillStyle = '#2a2d35'; ctx.strokeStyle = '#000'; ctx.lineWidth = 0.03;
+      ctx.beginPath(); ctx.arc(-0.03, 0.05, 0.25, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.beginPath(); ctx.arc(-0.11, -0.03, 0.06, 0, 7); ctx.fill();
+      ctx.fillStyle = '#555'; ctx.fillRect(0.06, -0.24, 0.1, 0.08);
+      ctx.strokeStyle = '#c9a36b'; ctx.lineWidth = 0.035;
+      ctx.beginPath(); ctx.moveTo(0.12, -0.24); ctx.quadraticCurveTo(0.17, -0.36, 0.25, -0.32); ctx.stroke();
+      ctx.fillStyle = Math.floor(it.t * 12) % 2 ? '#ffd23f' : '#ff7a1a';
+      ctx.beginPath(); ctx.arc(0.26, -0.33, 0.055 + 0.02 * Math.sin(it.t * 30), 0, 7); ctx.fill();
+    } else if (it.type === 'shield') {
+      ctx.fillStyle = '#46d4ff'; ctx.strokeStyle = '#0b6e8f'; ctx.lineWidth = 0.035;
+      ctx.beginPath(); ctx.moveTo(0, -0.3); ctx.lineTo(0.24, -0.22); ctx.lineTo(0.22, 0.03);
+      ctx.quadraticCurveTo(0.18, 0.22, 0, 0.32); ctx.quadraticCurveTo(-0.18, 0.22, -0.22, 0.03); ctx.lineTo(-0.24, -0.22);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.55)';
+      ctx.beginPath(); ctx.moveTo(0, -0.24); ctx.lineTo(0, 0.25); ctx.quadraticCurveTo(-0.14, 0.17, -0.17, 0.02); ctx.lineTo(-0.18, -0.18); ctx.closePath(); ctx.fill();
+    } else {
+      ctx.rotate(-0.6); ctx.translate(-0.09, 0); // centred in its circle
+      drawScissors(0.3 + 0.2 * Math.abs(Math.sin(it.t * 3)));
+    }
+    ctx.restore();
   }
 
   const ease = t => 1 - Math.pow(1 - t, 3);
@@ -592,7 +869,7 @@
       const k = +b.dataset.k;
       b.classList.toggle('forbidden', k === forbidden);
       b.classList.toggle('off', k === offKey);
-      b.querySelector('small').textContent = k === offKey ? 'OFF' : k === forbidden ? `+${GROW_PENALTY}` : '↑→↓←'[k];
+      b.querySelector('small').textContent = k === offKey ? 'OFF' : k === forbidden ? EFFECT_LABEL[effect] : '↑→↓←'[k];
     }
   }
 
