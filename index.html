@@ -19,10 +19,14 @@
   .hud b { font-size: 24px; display: block; }
   @keyframes blink { 50% { opacity: .2; } }
   canvas { display: block; border-radius: 6px; }
-  .controls { display: flex; gap: 12px; }
-  .controls button { width: 130px; height: 64px; border-radius: 12px; border: 2px solid var(--wall);
-    background: var(--panel); color: var(--ink); font-size: 28px; cursor: pointer; position: relative; }
-  .controls button small { display: block; font-size: 11px; color: var(--mut); letter-spacing: .06em; }
+  .controls { display: grid; grid-template-columns: repeat(3, 72px); grid-template-rows: 46px 46px; gap: 6px; }
+  .controls button { border-radius: 10px; border: 2px solid var(--wall); padding: 0;
+    background: var(--panel); color: var(--ink); font: 700 20px/1 system-ui, sans-serif; cursor: pointer; }
+  .controls button small { display: block; font-size: 10px; font-weight: 500; color: var(--mut); letter-spacing: .06em; margin-top: 3px; }
+  .controls [data-k="0"] { grid-column: 2; grid-row: 1; }
+  .controls [data-k="3"] { grid-column: 1; grid-row: 2; }
+  .controls [data-k="2"] { grid-column: 2; grid-row: 2; }
+  .controls [data-k="1"] { grid-column: 3; grid-row: 2; }
   .controls button.forbidden { background: var(--bad); border-color: #ff8a80; color: #fff;
     box-shadow: 0 0 18px rgba(255, 90, 78, .55); }
   .controls button.forbidden small { color: #fff; }
@@ -41,10 +45,12 @@
   </div>
   <canvas id="c"></canvas>
   <div class="controls">
-    <button id="btnL" aria-label="Turn left">&#8630;<small>LEFT</small></button>
-    <button id="btnR" aria-label="Turn right">&#8631;<small>RIGHT</small></button>
+    <button data-k="0" aria-label="Up">W<small>↑</small></button>
+    <button data-k="3" aria-label="Left">A<small>←</small></button>
+    <button data-k="2" aria-label="Down">S<small>↓</small></button>
+    <button data-k="1" aria-label="Right">D<small>→</small></button>
   </div>
-  <div class="help">← / → or A / D to steer · P to pause · <a href="instructions.html">instructions</a></div>
+  <div class="help">W A S D or arrow keys to steer · P to pause · <a href="instructions.html">instructions</a></div>
 </div>
 <script>
 (() => {
@@ -53,24 +59,35 @@
   const START_LEN = 4;
   const GROW_PENALTY = 3;      // segments added when pressing the forbidden side
   const MOVE_TIME = 0.14;      // seconds per snake step
-  const SWAP_EVERY = 20;       // seconds before the forbidden side swaps
-  const SWAP_WARN = 3;         // seconds of warning before a swap
+  const SWAP_MIN = 10, SWAP_MAX = 22; // seconds before the forbidden key changes (random in range)
+  const SWAP_WARN = 2;         // seconds of warning before it changes
+  const RB_SPEED = 1.6;        // red button speed, cells/second (it homes in on the head)
+  const RB_REACH = 3;        // how close the head must get before the arm presses it
+  const RB_LIFE = 14;          // seconds before an unpressed red button fades away
+  const ARM_TIME = 0.8, RICK_TIME = 4;
   const HIT_PAUSE = 1.2;       // freeze after a hit
 
-  // Directions clockwise: up, right, down, left. Right turn = +1, left turn = -1.
+  // Directions (also the key ids): 0 up/W, 1 right/D, 2 down/S, 3 left/A.
   const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+  const KEYS = ['W', 'D', 'S', 'A'];
 
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
   const $ = id => document.getElementById(id);
   const scoreEl = $('score'), bestEl = $('best'), lenEl = $('len');
-  const btnL = $('btnL'), btnR = $('btnR');
+  const btns = [...document.querySelectorAll('.controls button')];
 
   let best = 0;
   try { best = +localStorage.getItem('snakeDodgeBest') || 0; } catch (e) {}
 
   let snake, dir, turns, grow, obstacles, score, state, moveAcc, spawnAcc, elapsed;
-  let forbidden = Math.random() < 0.5 ? -1 : 1, swapTimer = SWAP_EVERY;
+  let forbidden = Math.floor(Math.random() * 4), swapTimer = 0;
   let hitTimer = 0, penaltyFlash = 0, hitMsg = '';
+  let rb = null, rbTimer = 0, armT = 0, rickT = 0;
+  const swapIn = () => SWAP_MIN + Math.random() * (SWAP_MAX - SWAP_MIN);
+  function newForbidden() {
+    let k; do k = Math.floor(Math.random() * 4); while (k === forbidden);
+    forbidden = k; swapTimer = swapIn();
+  }
 
   function reset() {
     const y = Math.floor(ROWS * 0.65), x = Math.floor(COLS / 2) - 1;
@@ -78,7 +95,8 @@
     for (let i = 0; i < START_LEN; i++) snake.push({ x: x - i + 1, y });
     dir = 1; turns = []; grow = 0; obstacles = [];
     score = 0; moveAcc = 0; spawnAcc = 0.6; elapsed = 0;
-    swapTimer = SWAP_EVERY;
+    swapTimer = swapIn();
+    rb = null; rbTimer = 10 + Math.random() * 8;
     state = 'ready';
   }
 
@@ -96,30 +114,31 @@
   }
 
   // ---- Input ----
-  function steer(side) {
-    if (state === 'ready') { state = 'playing'; return; }
-    if (state === 'paused') { state = 'playing'; return; }
-    if (state !== 'playing' || turns.length >= 2) return;
-    turns.push(side);
-    if (side === forbidden) {
+  function press(k) {
+    if (state === 'ready' || state === 'paused') { state = 'playing'; return; }
+    if (state !== 'playing') return;
+    if (k === forbidden) {
       grow += GROW_PENALTY; penaltyFlash = 0.35;
       beep(140, 0.18, 'sawtooth', 0.08);
     } else beep(520, 0.03, 'square', 0.03);
+    const lastDir = turns.length ? turns[turns.length - 1] : dir;
+    if (k !== lastDir && k !== (lastDir + 2) % 4 && turns.length < 2) turns.push(k);
   }
+  const KEYMAP = { w: 0, arrowup: 0, d: 1, arrowright: 1, s: 2, arrowdown: 2, a: 3, arrowleft: 3 };
   addEventListener('keydown', e => {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
-    if (k === 'arrowleft' || k === 'a') { steer(-1); e.preventDefault(); }
-    else if (k === 'arrowright' || k === 'd') { steer(1); e.preventDefault(); }
+    if (k in KEYMAP) { press(KEYMAP[k]); e.preventDefault(); }
     else if (k === 'p' || k === 'escape') { if (state === 'playing') state = 'paused'; else if (state === 'paused') state = 'playing'; }
     else if ((k === ' ' || k === 'enter') && (state === 'ready' || state === 'paused')) { state = 'playing'; e.preventDefault(); }
   });
-  btnL.addEventListener('pointerdown', e => { e.preventDefault(); steer(-1); });
-  btnR.addEventListener('pointerdown', e => { e.preventDefault(); steer(1); });
+  for (const b of btns) b.addEventListener('pointerdown', e => { e.preventDefault(); press(+b.dataset.k); });
   cv.addEventListener('pointerdown', e => {
+    // tap on the board: steer toward the tap, relative to the head
     e.preventDefault();
-    const r = cv.getBoundingClientRect();
-    steer(e.clientX - r.left < r.width / 2 ? -1 : 1);
+    const r = cv.getBoundingClientRect(), h = snake[0];
+    const dx = e.clientX - r.left - pad - (h.x + 0.5) * cell, dy = e.clientY - r.top - pad - (h.y + 0.5) * cell;
+    press(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0));
   });
   addEventListener('blur', () => { if (state === 'playing') state = 'paused'; });
 
@@ -130,7 +149,7 @@
   }
 
   function step() {
-    if (turns.length) dir = (dir + turns.shift() + 4) % 4;
+    if (turns.length) dir = turns.shift();
     const h = snake[0], nx = h.x + DIRS[dir][0], ny = h.y + DIRS[dir][1];
     if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return hit('Hit the wall');
     const body = grow > 0 ? snake : snake.slice(0, -1);
@@ -155,6 +174,21 @@
     return snake.some(s => o.x + m < s.x + 1 && o.x + o.w - m > s.x && o.y + m < s.y + 1 && o.y + 1 - m > s.y);
   }
 
+  // The red button drifts toward the head. Get close and the snake grows an arm and presses it.
+  function updateRedButton(dt) {
+    if (!rb) {
+      rbTimer -= dt;
+      if (rbTimer <= 0) rb = { x: 1 + Math.random() * (COLS - 2), y: -0.5, life: RB_LIFE };
+      return;
+    }
+    const h = snake[0], hx = h.x + 0.5, hy = h.y + 0.5;
+    const dx = hx - rb.x, dy = hy - rb.y, d = Math.hypot(dx, dy);
+    if (d < RB_REACH) { state = 'arm'; armT = 0; beep(300, 0.1, 'triangle', 0.08); return; }
+    rb.x += dx / d * RB_SPEED * dt; rb.y += dy / d * RB_SPEED * dt;
+    rb.life -= dt;
+    if (rb.life <= 0) { rb = null; rbTimer = 15 + Math.random() * 15; }
+  }
+
   function update(dt) {
     if (penaltyFlash > 0) penaltyFlash -= dt;
     if (state === 'hit') {
@@ -162,11 +196,23 @@
       if (hitTimer <= 0) reset();
       return;
     }
+    if (state === 'arm') {
+      armT += dt;
+      if (armT >= ARM_TIME) { state = 'rick'; rickT = 0; beep(60, 0.3, 'square', 0.1); }
+      return;
+    }
+    if (state === 'rick') {
+      const beat = Math.floor(rickT / 0.18);
+      rickT += dt;
+      if (Math.floor(rickT / 0.18) !== beat) beep([262, 330, 392, 523, 392, 330][beat % 6], 0.12, 'square', 0.04);
+      if (rickT >= RICK_TIME) { state = 'playing'; rb = null; rbTimer = 15 + Math.random() * 15; moveAcc = 0; }
+      return;
+    }
     if (state !== 'playing') return;
 
     elapsed += dt;
     swapTimer -= dt;
-    if (swapTimer <= 0) { forbidden = -forbidden; swapTimer = SWAP_EVERY; beep(880, 0.12, 'triangle', 0.08); }
+    if (swapTimer <= 0) { newForbidden(); beep(880, 0.12, 'triangle', 0.08); }
 
     moveAcc += dt;
     while (moveAcc >= MOVE_TIME && state === 'playing') { moveAcc -= MOVE_TIME; step(); }
@@ -174,6 +220,9 @@
 
     spawnAcc -= dt;
     if (spawnAcc <= 0) { spawn(); spawnAcc = 1.1 - difficulty() * 0.75 + Math.random() * 0.3; }
+
+    updateRedButton(dt);
+    if (state !== 'playing') return;
 
     for (const o of obstacles) o.y += o.v * dt;
     for (const o of obstacles) if (overlapsSnake(o)) return hit('Hit by an obstacle');
@@ -189,7 +238,7 @@
   // ---- Rendering ----
   let cell = 20, pad = 6;
   function resize() {
-    const availW = innerWidth - 24, availH = innerHeight - 185;
+    const availW = innerWidth - 24, availH = innerHeight - 220;
     cell = Math.max(10, Math.floor(Math.min(availW / COLS, availH / ROWS)));
     const w = COLS * cell + pad * 2, h = ROWS * cell + pad * 2, dpr = devicePixelRatio || 1;
     cv.width = w * dpr; cv.height = h * dpr;
@@ -226,6 +275,23 @@
       ctx.fillRect(o.x * cell + 3, o.y * cell + cell * 0.65, o.w * cell - 6, 2);
     }
 
+    // red button
+    if (rb) {
+      const pressed = state === 'arm' && armT > ARM_TIME * 0.75;
+      const fade = Math.min(1, rb.life / 1.5), pulse = 1 + Math.sin(performance.now() / 120) * 0.08;
+      const bx = rb.x * cell, by = rb.y * cell, R = cell * 0.7 * pulse;
+      ctx.globalAlpha = fade;
+      ctx.fillStyle = 'rgba(255,60,50,.25)';
+      ctx.beginPath(); ctx.arc(bx, by, R * 1.6, 0, 7); ctx.fill();
+      ctx.fillStyle = '#2b2f38';
+      ctx.beginPath(); ctx.arc(bx, by + cell * 0.12, R, 0, 7); ctx.fill();
+      ctx.fillStyle = pressed ? '#b3261e' : '#ff3b30';
+      ctx.beginPath(); ctx.arc(bx, by - (pressed ? 0 : cell * 0.12), R * 0.75, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.45)';
+      ctx.beginPath(); ctx.arc(bx - R * 0.25, by - R * 0.35, R * 0.18, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
     // snake
     const flash = penaltyFlash > 0 && Math.floor(penaltyFlash * 20) % 2 === 0;
     snake.forEach((s, i) => {
@@ -243,11 +309,24 @@
       ctx.arc(cx + dx * cell * 0.18 + -dy * sgn * cell * 0.2, cy + dy * cell * 0.18 + dx * sgn * cell * 0.2, Math.max(1.5, cell * 0.08), 0, 7);
       ctx.fill();
     }
+    // the arm reaching for the red button
+    if (state === 'arm' && rb) {
+      const t = Math.min(1, armT / (ARM_TIME * 0.75));
+      const ex = cx + (rb.x * cell - cx) * t, ey = cy + (rb.y * cell - cy) * t;
+      const wob = Math.sin(t * Math.PI) * cell * 0.6, len = Math.hypot(ex - cx, ey - cy) || 1;
+      const mx = (cx + ex) / 2 - (ey - cy) / len * wob, my2 = (cy + ey) / 2 + (ex - cx) / len * wob;
+      ctx.strokeStyle = '#5ee07a'; ctx.lineWidth = cell * 0.36; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.quadraticCurveTo(mx, my2, ex, ey); ctx.stroke();
+      ctx.fillStyle = '#a6f5b5';
+      ctx.beginPath(); ctx.arc(ex, ey, cell * 0.34, 0, 7); ctx.fill();
+    }
     ctx.restore();
+
+    if (state === 'rick') return drawRick(W, H);
 
     // overlays
     const my = pad + H * 0.36;
-    const msg = state === 'ready' ? ['Snake Dodge', 'Press ← / → or tap to start']
+    const msg = state === 'ready' ? ['Snake Dodge', 'Press W A S D or tap to start']
       : state === 'paused' ? ['Paused', 'Press P or tap to continue']
       : state === 'hit' ? [hitMsg, 'Score reset'] : null;
     if (msg) {
@@ -260,11 +339,44 @@
       ctx.font = `${Math.max(12, cell * 0.6)}px system-ui, sans-serif`;
       ctx.fillText(msg[1], pad + W / 2, my + cell * 0.8);
       if (state === 'ready') {
-        const side = forbidden < 0 ? 'LEFT' : 'RIGHT';
         ctx.fillStyle = '#ff5a4e';
-        ctx.fillText(`Avoid pressing ${side}: it makes you grow`, pad + W / 2, my + cell * 2);
+        ctx.fillText(`Don't press the red key (${KEYS[forbidden]}): it makes you grow`, pad + W / 2, my + cell * 2);
       }
     }
+  }
+
+  function drawRick(W, H) {
+    const t = rickT;
+    for (let i = 0; i < 8; i++) {
+      ctx.fillStyle = `hsl(${(i * 45 + t * 400) % 360}, 85%, 55%)`;
+      ctx.fillRect(pad, pad + i * H / 8, W, H / 8 + 1);
+    }
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    ctx.fillRect(pad, pad, W, H);
+    // a little dancing figure
+    const fx = pad + W / 2 + Math.sin(t * 6) * cell * 2, fy = pad + H * 0.62, s = cell * 1.4;
+    const sw = Math.sin(t * 14);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(3, cell * 0.18); ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(fx, fy - s); ctx.lineTo(fx, fy + s * 0.6);                              // body
+    ctx.moveTo(fx, fy - s * 0.6); ctx.lineTo(fx - s, fy - s * (0.6 + sw * 0.6));         // arms
+    ctx.moveTo(fx, fy - s * 0.6); ctx.lineTo(fx + s, fy - s * (0.6 - sw * 0.6));
+    ctx.moveTo(fx, fy + s * 0.6); ctx.lineTo(fx - s * 0.6, fy + s * 1.6);               // legs
+    ctx.moveTo(fx, fy + s * 0.6); ctx.lineTo(fx + s * 0.6 + sw * s * 0.3, fy + s * 1.6);
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(fx, fy - s * 1.35, s * 0.35, 0, 7); ctx.fill();
+    // text
+    ctx.save();
+    ctx.translate(pad + W / 2, pad + H * 0.3);
+    ctx.rotate(Math.sin(t * 5) * 0.12);
+    const sc = 1 + Math.sin(t * 10) * 0.08; ctx.scale(sc, sc);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+    ctx.font = `800 ${Math.max(22, cell * 1.6)}px system-ui, sans-serif`;
+    ctx.fillText('RICK ROLLED!', 0, 0);
+    ctx.font = `600 ${Math.max(12, cell * 0.7)}px system-ui, sans-serif`;
+    ctx.fillText('Never gonna give you up', 0, cell * 1.2);
+    ctx.restore();
   }
 
   function hud() {
@@ -272,10 +384,11 @@
     bestEl.textContent = best;
     lenEl.textContent = snake.length + grow;
     const warn = state === 'playing' && swapTimer <= SWAP_WARN;
-    for (const [b, s] of [[btnL, -1], [btnR, 1]]) {
-      b.classList.toggle('forbidden', s === forbidden);
-      b.classList.toggle('warn', warn && s === forbidden);
-      b.querySelector('small').textContent = s === forbidden ? `+${GROW_PENALTY} LENGTH` : s < 0 ? 'LEFT' : 'RIGHT';
+    for (const b of btns) {
+      const k = +b.dataset.k;
+      b.classList.toggle('forbidden', k === forbidden);
+      b.classList.toggle('warn', warn && k === forbidden);
+      b.querySelector('small').textContent = k === forbidden ? `+${GROW_PENALTY}` : '↑→↓←'[k];
     }
   }
 
