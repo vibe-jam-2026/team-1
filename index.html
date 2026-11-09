@@ -13,7 +13,16 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
     font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden;
     touch-action: manipulation; user-select: none; -webkit-user-select: none; }
-  .app { height: 100%; display: flex; flex-direction: column; align-items: center; padding: 12px 16px; gap: 10px; }
+  /* The rickroll video sits behind the whole game and shows once the red button is pressed */
+  .bgvid { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+    opacity: 0; visibility: hidden; transition: opacity .6s; background: #000; }
+  .bgvid iframe { position: absolute; top: 50%; left: 50%; border: 0;
+    width: max(100vw, 177.78vh); height: max(100vh, 56.25vw); transform: translate(-50%, -50%); }
+  body.rolling { background: #000; }
+  body.rolling .bgvid { opacity: 1; visibility: visible; }
+  body.rolling .hud, body.rolling .help { text-shadow: 0 1px 4px #000, 0 0 2px #000; }
+  body.rolling .hud .k, body.rolling .help, body.rolling a { color: #e9ecf1; }
+  .app { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; align-items: center; padding: 12px 16px; gap: 10px; }
   .hud { display: flex; gap: 22px; align-items: baseline; font-variant-numeric: tabular-nums; }
   .hud .k { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--mut); }
   .hud b { font-size: 24px; display: block; }
@@ -37,6 +46,10 @@
 </style>
 </head>
 <body>
+<div class="bgvid" aria-hidden="true">
+  <iframe id="rickvid" title="Background video" tabindex="-1" allow="autoplay; encrypted-media"
+    src="https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1&controls=0&disablekb=1&loop=1&playlist=dQw4w9WgXcQ&modestbranding=1&playsinline=1&rel=0&iv_load_policy=3"></iframe>
+</div>
 <div class="app">
   <div class="hud">
     <div><span class="k">Score</span><b id="score">0</b></div>
@@ -64,7 +77,7 @@
   const RB_SPEED = 1.6;        // red button speed, cells/second (it homes in on the head)
   const RB_REACH = 3;        // how close the head must get before the arm presses it
   const RB_LIFE = 14;          // seconds before an unpressed red button fades away
-  const ARM_TIME = 0.8, RICK_TIME = 4;
+  const ARM_TIME = 0.8, RICK_TIME = 2; // RICK_TIME: freeze with the banner before play resumes on top of the video
   const HIT_PAUSE = 1.2;       // freeze after a hit
 
   // Directions (also the key ids): 0 up/W, 1 right/D, 2 down/S, 3 left/A.
@@ -98,6 +111,31 @@
     swapTimer = swapIn();
     rb = null; rbTimer = 10 + Math.random() * 8;
     state = 'ready';
+  }
+
+  // ---- Rickroll video (YouTube embed, driven by YouTube's iframe API) ----
+  let rolling = false, player = null;
+  const vid = document.getElementById('rickvid');
+  window.onYouTubeIframeAPIReady = () => { player = new YT.Player('rickvid'); };
+  const api = document.createElement('script');
+  api.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(api);
+  function startRoll() {
+    rolling = true; document.body.classList.add('rolling');
+    if (player && player.playVideo) {
+      try {
+        player.seekTo(0, true); player.unMute(); player.setVolume(80); player.playVideo();
+        // browsers may refuse to start a video with sound: then play it muted
+        setTimeout(() => {
+          if (rolling && ![1, 3].includes(player.getPlayerState())) { player.mute(); player.playVideo(); }
+        }, 1200);
+      } catch (e) {}
+    } else if (!vid.src.includes('autoplay=1')) vid.src += '&autoplay=1'; // API not loaded: autoplay the embed
+  }
+  function stopRoll() {
+    if (!rolling) return;
+    rolling = false; document.body.classList.remove('rolling');
+    try { if (player && player.pauseVideo) player.pauseVideo(); else vid.src = vid.src.replace('&autoplay=1', ''); } catch (e) {}
   }
 
   // ---- Sound ----
@@ -144,6 +182,7 @@
 
   // ---- Game logic ----
   function hit(msg) {
+    stopRoll(); // getting hit ends the rickroll
     hitMsg = msg; state = 'hit'; hitTimer = HIT_PAUSE;
     beep(90, 0.4, 'sawtooth', 0.1);
   }
@@ -177,6 +216,7 @@
   // The red button drifts toward the head. Get close and the snake grows an arm and presses it.
   function updateRedButton(dt) {
     if (!rb) {
+      if (rolling) return; // no new red button while the video plays
       rbTimer -= dt;
       if (rbTimer <= 0) rb = { x: 1 + Math.random() * (COLS - 2), y: -0.5, life: RB_LIFE };
       return;
@@ -198,14 +238,12 @@
     }
     if (state === 'arm') {
       armT += dt;
-      if (armT >= ARM_TIME) { state = 'rick'; rickT = 0; beep(60, 0.3, 'square', 0.1); }
+      if (armT >= ARM_TIME) { state = 'rick'; rickT = 0; rb = null; rbTimer = 15 + Math.random() * 15; startRoll(); }
       return;
     }
     if (state === 'rick') {
-      const beat = Math.floor(rickT / 0.18);
       rickT += dt;
-      if (Math.floor(rickT / 0.18) !== beat) beep([262, 330, 392, 523, 392, 330][beat % 6], 0.12, 'square', 0.04);
-      if (rickT >= RICK_TIME) { state = 'playing'; rb = null; rbTimer = 15 + Math.random() * 15; moveAcc = 0; }
+      if (rickT >= RICK_TIME) { state = 'playing'; moveAcc = 0; }
       return;
     }
     if (state !== 'playing') return;
@@ -251,12 +289,12 @@
 
   function draw() {
     const W = COLS * cell, H = ROWS * cell;
-    ctx.fillStyle = '#0d0f13';
-    ctx.fillRect(0, 0, W + pad * 2, H + pad * 2);
-    // border
+    ctx.clearRect(0, 0, W + pad * 2, H + pad * 2);
+    // border; while rickrolled the board is see-through so the video shows behind it
     ctx.fillStyle = state === 'hit' ? '#7a2620' : '#3a4050';
     rr(0, 0, W + pad * 2, H + pad * 2, 6);
-    ctx.fillStyle = '#171a21';
+    ctx.clearRect(pad, pad, W, H);
+    ctx.fillStyle = rolling ? 'rgba(23,26,33,.35)' : '#171a21';
     ctx.fillRect(pad, pad, W, H);
 
     ctx.save();
@@ -264,7 +302,7 @@
     ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
 
     // grid
-    ctx.fillStyle = '#1d2129';
+    ctx.fillStyle = rolling ? 'rgba(255,255,255,.04)' : '#1d2129';
     for (let x = 0; x < COLS; x++) for (let y = 0; y < ROWS; y++) if ((x + y) % 2) ctx.fillRect(x * cell, y * cell, cell, cell);
 
     // obstacles
@@ -347,37 +385,19 @@
 
   function drawRick(W, H) {
     const t = rickT;
-    for (let i = 0; i < 8; i++) {
-      ctx.fillStyle = `hsl(${(i * 45 + t * 400) % 360}, 85%, 55%)`;
-      ctx.fillRect(pad, pad + i * H / 8, W, H / 8 + 1);
-    }
-    ctx.fillStyle = 'rgba(0,0,0,.35)';
-    ctx.fillRect(pad, pad, W, H);
-    // a little dancing figure
-    const fx = pad + W / 2 + Math.sin(t * 6) * cell * 2, fy = pad + H * 0.62, s = cell * 1.4;
-    const sw = Math.sin(t * 14);
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(3, cell * 0.18); ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(fx, fy - s); ctx.lineTo(fx, fy + s * 0.6);                              // body
-    ctx.moveTo(fx, fy - s * 0.6); ctx.lineTo(fx - s, fy - s * (0.6 + sw * 0.6));         // arms
-    ctx.moveTo(fx, fy - s * 0.6); ctx.lineTo(fx + s, fy - s * (0.6 - sw * 0.6));
-    ctx.moveTo(fx, fy + s * 0.6); ctx.lineTo(fx - s * 0.6, fy + s * 1.6);               // legs
-    ctx.moveTo(fx, fy + s * 0.6); ctx.lineTo(fx + s * 0.6 + sw * s * 0.3, fy + s * 1.6);
-    ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(fx, fy - s * 1.35, s * 0.35, 0, 7); ctx.fill();
-    // text
     ctx.save();
     ctx.translate(pad + W / 2, pad + H * 0.3);
     ctx.rotate(Math.sin(t * 5) * 0.12);
     const sc = 1 + Math.sin(t * 10) * 0.08; ctx.scale(sc, sc);
     ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+    ctx.shadowColor = '#000'; ctx.shadowBlur = 8;
     ctx.font = `800 ${Math.max(22, cell * 1.6)}px system-ui, sans-serif`;
     ctx.fillText('RICK ROLLED!', 0, 0);
     ctx.font = `600 ${Math.max(12, cell * 0.7)}px system-ui, sans-serif`;
-    ctx.fillText('Never gonna give you up', 0, cell * 1.2);
+    ctx.fillText('Survive on top of the video. Get hit to make it stop.', 0, cell * 1.2);
     ctx.restore();
   }
+
 
   function hud() {
     scoreEl.textContent = score;
