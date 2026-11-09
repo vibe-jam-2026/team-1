@@ -112,11 +112,11 @@
   const RB_SPEED = 1.6;        // red button speed, cells/second (it homes in on the head)
   const RB_REACH = 3;        // how close the head must get before the arm presses it
   const RB_LIFE = 14;          // seconds before an unpressed red button fades away
-  const RB_EVERY = () => 5 + Math.random() * 6; // seconds until the next red button
+  // The red (rickroll) and blue (boss fight) buttons spawn independently: at most one of each at a time.
+  const BTN_EVERY = { red: () => 4 + Math.random() * 4, blue: () => 6 + Math.random() * 6 }; // seconds until the next one
   // Arm timeline (seconds into the 'arm' state): reach out, wind up high, SLAM, then let the impact ring out.
   const T_REACH = 0.45, T_WIND = 0.75, T_SLAM = 0.83, ARM_TIME = 1.5;
   const RICK_TIME = 0.6;       // short pause while the video starts, then play resumes on top of it
-  const BLUE_CHANCE = 0.35;    // chance a button is the blue one, which starts the boss fight
   const BOSS_WIN_POINTS = 100; // for beating both bosses (and not pressing the final button)
   const HIT_PAUSE = 1.2;       // freeze after a hit
   // Power-ups: bomb, shield, scissors. Some of them are traps.
@@ -147,7 +147,8 @@
   let items = [], puTimer = 0, shieldT = 0, turboT = 0, slowT = 0, bombFlash = 0;
   let fx = [], debris = [], popups = [], snip = null; // particles, cut-off tail pieces, floating texts, scissors animation
   let offKey = -1, offTimer = 0; // offKey: the key that is switched off right now (-1 = none)
-  let rb = null, rbTimer = 0, armT = 0, rickT = 0, sparks = [];
+  let buttons = { red: null, blue: null }, btnTimer = { red: 0, blue: 0 };
+  let rb = null, armT = 0, rickT = 0, sparks = []; // rb: the button the arm is slamming right now
   function toggleForbidden() {
     if (forbidden >= 0) { forbidden = -1; swapTimer = SAFE_TIME(); return; }
     do forbidden = Math.floor(Math.random() * 4); while (forbidden === offKey);
@@ -164,7 +165,8 @@
     score = 0; moveAcc = 0; spawnAcc = 0.6; elapsed = 0;
     forbidden = -1; swapTimer = SAFE_TIME(); // every key is safe at the start
     offKey = -1; offTimer = OFF_EVERY();
-    rb = null; rbTimer = 3 + Math.random() * 3;
+    rb = null; buttons = { red: null, blue: null };
+    btnTimer = { red: 3 + Math.random() * 3, blue: 5 + Math.random() * 4 };
     items = []; puTimer = 2 + Math.random() * 3; shieldT = 0; turboT = 0; slowT = 0;
     debris = []; snip = null;
     state = 'ready';
@@ -432,20 +434,22 @@
     return snake.some(s => o.x + m < s.x + 1 && o.x + o.w - m > s.x && o.y + m < s.y + 1 && o.y + 1 - m > s.y);
   }
 
-  // The red button drifts toward the head. Get close and the snake grows an arm and presses it.
-  function updateRedButton(dt) {
-    if (!rb) {
-      if (rolling) return; // no new red button while the video plays
-      rbTimer -= dt;
-      if (rbTimer <= 0) rb = { x: 1 + Math.random() * (COLS - 2), y: -0.5, life: RB_LIFE, blue: Math.random() < BLUE_CHANCE };
-      return;
-    }
+  // The buttons drift toward the head. Get close to one and the snake grows an arm and slams it.
+  function updateButtons(dt) {
     const h = snake[0], hx = h.x + 0.5, hy = h.y + 0.5;
-    const dx = hx - rb.x, dy = hy - rb.y, d = Math.hypot(dx, dy);
-    if (d < RB_REACH) { state = 'arm'; armT = 0; beep(300, 0.1, 'triangle', 0.08); return; }
-    rb.x += dx / d * RB_SPEED * dt; rb.y += dy / d * RB_SPEED * dt;
-    rb.life -= dt;
-    if (rb.life <= 0) { rb = null; rbTimer = RB_EVERY(); }
+    for (const kind of ['red', 'blue']) {
+      const b = buttons[kind];
+      if (!b) {
+        if (kind === 'red' && rolling) continue; // no new red button while the video plays
+        if ((btnTimer[kind] -= dt) <= 0) buttons[kind] = { x: 1 + Math.random() * (COLS - 2), y: -0.5, life: RB_LIFE, blue: kind === 'blue' };
+        continue;
+      }
+      const dx = hx - b.x, dy = hy - b.y, d = Math.hypot(dx, dy);
+      if (d < RB_REACH) { rb = b; state = 'arm'; armT = 0; beep(300, 0.1, 'triangle', 0.08); return; }
+      b.x += dx / d * RB_SPEED * dt; b.y += dy / d * RB_SPEED * dt;
+      b.life -= dt;
+      if (b.life <= 0) { buttons[kind] = null; btnTimer[kind] = BTN_EVERY[kind](); }
+    }
   }
 
   // The blue button: off to a different game, the boss fight against Rick (boss.js).
@@ -494,7 +498,9 @@
       sparks = sparks.filter(p => p.life > 0);
       if (armT >= ARM_TIME) {
         const blue = rb.blue;
-        rb = null; sparks = []; rbTimer = RB_EVERY(); cv.style.transform = '';
+        const kind = blue ? 'blue' : 'red';
+        buttons[kind] = null; btnTimer[kind] = BTN_EVERY[kind]();
+        rb = null; sparks = []; cv.style.transform = '';
         if (blue) startBoss();
         else { state = 'rick'; rickT = 0; startRoll(); }
       }
@@ -533,7 +539,7 @@
     spawnAcc -= dt;
     if (spawnAcc <= 0) { spawn(); spawnAcc = (1.1 - difficulty() * 0.75 + Math.random() * 0.3) * 19 / COLS; }
 
-    updateRedButton(dt);
+    updateButtons(dt);
     if (state !== 'playing') return;
 
     for (const o of obstacles) o.y += o.v * dt;
@@ -597,36 +603,9 @@
     // power-ups
     for (const it of items) if (it.life > 2 || Math.floor(it.life * 8) % 2) drawItem(it);
 
-    // red button
-    if (rb) {
-      const pressed = state === 'arm' && armT >= T_SLAM;
-      const fade = Math.min(1, rb.life / 1.5), pulse = state === 'arm' ? 1 : 1 + Math.sin(performance.now() / 120) * 0.08;
-      const bx = rb.x * cell, by = rb.y * cell, R = cell * 0.7 * pulse;
-      ctx.globalAlpha = fade;
-      const col = rb.blue ? ['rgba(50,130,255,.28)', '#2f7bff', '#1d4fb3'] : ['rgba(255,60,50,.25)', '#ff3b30', '#a8201a'];
-      ctx.fillStyle = col[0];
-      ctx.beginPath(); ctx.arc(bx, by, R * 1.6, 0, 7); ctx.fill();
-      ctx.fillStyle = '#2b2f38';
-      ctx.beginPath(); ctx.arc(bx, by + cell * 0.12, R, 0, 7); ctx.fill();
-      ctx.fillStyle = pressed ? col[2] : col[1];
-      ctx.beginPath();
-      if (pressed) ctx.ellipse(bx, by + cell * 0.08, R * 0.85, R * 0.6, 0, 0, 7); // squashed flat
-      else ctx.arc(bx, by - cell * 0.12, R * 0.75, 0, 7);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,.45)';
-      ctx.beginPath(); ctx.arc(bx - R * 0.25, by - R * 0.35, R * 0.18, 0, 7); ctx.fill();
-      // the "DON'T PRESS" sign hanging under it
-      const fs = Math.max(9, cell * 0.42), ly = by + cell * 1.25;
-      ctx.font = `800 ${fs}px system-ui, sans-serif`;
-      const label = rb.blue ? "ALSO DON'T PRESS" : "DON'T PRESS";
-      const tw = ctx.measureText(label).width + fs * 0.9;
-      ctx.fillStyle = 'rgba(15,17,22,.9)'; ctx.strokeStyle = col[1]; ctx.lineWidth = Math.max(1.5, cell * 0.06);
-      ctx.beginPath(); ctx.roundRect(bx - tw / 2, ly - fs * 0.8, tw, fs * 1.6, fs * 0.4); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(label, bx, ly + fs * 0.05);
-      ctx.textBaseline = 'alphabetic';
-      ctx.globalAlpha = 1;
-    }
+    // the red and blue buttons
+    for (const b of [buttons.red, buttons.blue]) if (b) drawPushButton(b);
+
 
     // cut-off tail pieces tumbling away
     for (const d of debris) {
@@ -751,6 +730,38 @@
         ctx.fillText(`Red key? Don't press it: you grow, speed up or slow down`, pad + W / 2, my + cell * 2);
       }
     }
+  }
+
+  // A red or blue button with its "DON'T PRESS" sign.
+  function drawPushButton(b) {
+    const pressed = state === 'arm' && b === rb && armT >= T_SLAM;
+    const pulse = state === 'arm' ? 1 : 1 + Math.sin(performance.now() / 120) * 0.08;
+    const fade = Math.min(1, b.life / 1.5);
+    const bx = b.x * cell, by = b.y * cell, R = cell * 0.7 * pulse;
+    ctx.globalAlpha = fade;
+    const col = b.blue ? ['rgba(50,130,255,.28)', '#2f7bff', '#1d4fb3'] : ['rgba(255,60,50,.25)', '#ff3b30', '#a8201a'];
+    ctx.fillStyle = col[0];
+    ctx.beginPath(); ctx.arc(bx, by, R * 1.6, 0, 7); ctx.fill();
+    ctx.fillStyle = '#2b2f38';
+    ctx.beginPath(); ctx.arc(bx, by + cell * 0.12, R, 0, 7); ctx.fill();
+    ctx.fillStyle = pressed ? col[2] : col[1];
+    ctx.beginPath();
+    if (pressed) ctx.ellipse(bx, by + cell * 0.08, R * 0.85, R * 0.6, 0, 0, 7); // squashed flat
+    else ctx.arc(bx, by - cell * 0.12, R * 0.75, 0, 7);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.45)';
+    ctx.beginPath(); ctx.arc(bx - R * 0.25, by - R * 0.35, R * 0.18, 0, 7); ctx.fill();
+    // the "DON'T PRESS" sign hanging under it
+    const fs = Math.max(9, cell * 0.42), ly = by + cell * 1.25;
+    ctx.font = `800 ${fs}px system-ui, sans-serif`;
+    const label = b.blue ? "ALSO DON'T PRESS" : "DON'T PRESS";
+    const tw = ctx.measureText(label).width + fs * 0.9;
+    ctx.fillStyle = 'rgba(15,17,22,.9)'; ctx.strokeStyle = col[1]; ctx.lineWidth = Math.max(1.5, cell * 0.06);
+    ctx.beginPath(); ctx.roundRect(bx - tw / 2, ly - fs * 0.8, tw, fs * 1.6, fs * 0.4); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, bx, ly + fs * 0.05);
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
   }
 
   // Power-up icons, drawn in units of one cell around (0, 0).
