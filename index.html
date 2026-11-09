@@ -1,45 +1,301 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Team 1 · Claude Code exercise</title><style>
-:root { --y: #FFB838; --ink: #34322E; --mut: #6b675f; --line: #e6e2da; }
-* { box-sizing: border-box; }
-body { margin: 0; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: #fff; }
-header { background: var(--y); padding: 32px 0 24px; }
-.wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
-header .k { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; opacity: .7; }
-header h1 { margin: 6px 0 14px; font-size: 40px; font-weight: 500; }
-header .where { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 15px; }
-header a { color: inherit; font-weight: 600; }
-main { max-width: 980px; margin: 0 auto; padding: 8px 24px 64px; }
-h2.part { font-size: 28px; font-weight: 500; margin: 40px 0 8px; padding-top: 24px; border-top: 4px solid var(--y); }
-h2 { font-size: 19px; margin: 28px 0 8px; }
-h3 { font-size: 16px; margin: 0 0 6px; }
-.task { font-size: 20px; }
-.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; }
-@media (max-width: 760px) { .cols { grid-template-columns: 1fr; } header h1 { font-size: 30px; } }
-ul, ol { padding-left: 22px; } li { margin: 4px 0; }
-table { border-collapse: collapse; width: 100%; font-size: 15px; }
-td, th { text-align: left; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
-td:first-child { white-space: nowrap; }
-.demo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.demo div { background: #f6f4ef; border-radius: 8px; padding: 14px 16px; }
-.demo b { display: block; font-size: 22px; }
-.card { background: #f6f4ef; border-radius: 8px; padding: 14px 16px; }
-footer { color: var(--mut); font-size: 14px; margin-top: 48px; }</style></head><body>
-<header><div class="wrap"><div class="k">Claude Code exercise · Saab · 9–10 November 2026</div><h1>Team 1</h1>
-<div class="where"><span>Repo: <a href="https://github.com/vibe-jam-2026/team-1">github.com/vibe-jam-2026/team-1</a></span><span>Address: <a href="https://vibe-jam-2026.github.io/team-1/">vibe-jam-2026.github.io/team-1</a></span><span>Build at: <a href="https://claude.ai/code">claude.ai/code</a></span></div></div></header>
-<main>
-  <h2 class="part">Your repo and how to publish</h2>
-  <p>Your repo is <a href="https://github.com/vibe-jam-2026/team-1"><b>github.com/vibe-jam-2026/team-1</b></a> and what you build is published at <a href="https://vibe-jam-2026.github.io/team-1/"><b>vibe-jam-2026.github.io/team-1</b></a>. You are reading this page there now: what you build replaces it. These instructions stay at <a href="instructions.html">vibe-jam-2026.github.io/team-1/instructions.html</a>.</p>
-  
-  <h2>How to publish</h2>
-  <ol>
-    <li>Open <b>claude.ai/code</b> in the browser and log in with <b>team1@rawe.se</b>. Adrian gives you the login code in the room. Accept the invitation to <b>VibeJam2026</b> when it shows.</li>
-    <li>One person in the team clicks <b>Sign in with GitHub</b> and approves with their own GitHub account. That person must have accepted the invitation to the team's repo, or Claude cannot push. Then pick the repo <b>vibe-jam-2026/team-1</b>.</li>
-    <li>The team shares one Claude login. Agree on who steers and when. Do not change its password or settings.</li>
-    <li>Your page starts from <b>index.html</b> at the top of the repo. Everything the browser needs must be in the repo as static files: HTML, JavaScript, CSS, images and sound.</li>
-    <li>Claude pushes its work to a branch of its own. Publish by asking it to open a pull request, then click <b>Merge</b> on github.com, so the change lands in <b>main</b>.</li>
-    <li>GitHub Pages publishes every change to main by itself. About a minute later the new version is live at your address.</li>
-    <li>Built with a tool such as Vite? Put the finished files at the top of the repo or in <b>docs/</b>. docs/ is picked up by itself when there is no index.html at the top. Use relative paths, because your site lives under /team-1/.</li>
-  </ol>
-  
-<footer>Questions during the exercise: ask Adrian.</footer></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Snake Dodge</title>
+<style>
+  :root {
+    --bg: #14161b; --panel: #1e2129; --ink: #e9ecf1; --mut: #8a93a3;
+    --snake: #5ee07a; --head: #a6f5b5; --bad: #ff5a4e; --obst: #ffb838; --wall: #3a4050;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  .app { height: 100%; display: flex; flex-direction: column; align-items: center; padding: 12px 16px; gap: 10px; }
+  .hud { display: flex; gap: 22px; align-items: baseline; font-variant-numeric: tabular-nums; }
+  .hud .k { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--mut); }
+  .hud b { font-size: 24px; display: block; }
+  .rule { font-size: 14px; color: var(--mut); min-height: 20px; text-align: center; }
+  .rule strong { color: var(--bad); }
+  .rule.warn strong { animation: blink .3s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  canvas { display: block; border-radius: 6px; }
+  .controls { display: flex; gap: 12px; }
+  .controls button { width: 130px; height: 64px; border-radius: 12px; border: 2px solid var(--wall);
+    background: var(--panel); color: var(--ink); font-size: 28px; cursor: pointer; position: relative; }
+  .controls button small { display: block; font-size: 11px; color: var(--mut); letter-spacing: .06em; }
+  .controls button.forbidden { border-color: var(--bad); color: var(--bad); }
+  .controls button.forbidden small { color: var(--bad); }
+  .controls button.forbidden.warn { animation: blink .3s steps(2) infinite; }
+  .controls button:active { transform: translateY(1px); }
+  .help { font-size: 12px; color: var(--mut); }
+  a { color: var(--mut); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="hud">
+    <div><span class="k">Score</span><b id="score">0</b></div>
+    <div><span class="k">Best</span><b id="best">0</b></div>
+    <div><span class="k">Length</span><b id="len">0</b></div>
+  </div>
+  <div class="rule" id="rule"></div>
+  <canvas id="c"></canvas>
+  <div class="controls">
+    <button id="btnL" aria-label="Turn left">&#8630;<small>LEFT</small></button>
+    <button id="btnR" aria-label="Turn right">&#8631;<small>RIGHT</small></button>
+  </div>
+  <div class="help">← / → or A / D to steer · P to pause · <a href="instructions.html">instructions</a></div>
+</div>
+<script>
+(() => {
+  // ---- Tunables (we will iterate on these) ----
+  const COLS = 19, ROWS = 23;
+  const START_LEN = 4;
+  const GROW_PENALTY = 3;      // segments added when pressing the forbidden side
+  const MOVE_TIME = 0.14;      // seconds per snake step
+  const SWAP_EVERY = 20;       // seconds before the forbidden side swaps
+  const SWAP_WARN = 3;         // seconds of warning before a swap
+  const HIT_PAUSE = 1.2;       // freeze after a hit
+
+  // Directions clockwise: up, right, down, left. Right turn = +1, left turn = -1.
+  const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const scoreEl = $('score'), bestEl = $('best'), lenEl = $('len'), ruleEl = $('rule');
+  const btnL = $('btnL'), btnR = $('btnR');
+
+  let best = 0;
+  try { best = +localStorage.getItem('snakeDodgeBest') || 0; } catch (e) {}
+
+  let snake, dir, turns, grow, obstacles, score, state, moveAcc, spawnAcc, elapsed;
+  let forbidden = Math.random() < 0.5 ? -1 : 1, swapTimer = SWAP_EVERY;
+  let hitTimer = 0, penaltyFlash = 0, hitMsg = '';
+
+  function reset() {
+    const y = Math.floor(ROWS * 0.65), x = Math.floor(COLS / 2) - 1;
+    snake = [];
+    for (let i = 0; i < START_LEN; i++) snake.push({ x: x - i + 1, y });
+    dir = 1; turns = []; grow = 0; obstacles = [];
+    score = 0; moveAcc = 0; spawnAcc = 0.6; elapsed = 0;
+    swapTimer = SWAP_EVERY;
+    state = 'ready';
+  }
+
+  // ---- Sound ----
+  let actx = null;
+  function beep(freq, dur = 0.08, type = 'square', vol = 0.06) {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+      o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+    } catch (e) {}
+  }
+
+  // ---- Input ----
+  function steer(side) {
+    if (state === 'ready') { state = 'playing'; return; }
+    if (state === 'paused') { state = 'playing'; return; }
+    if (state !== 'playing' || turns.length >= 2) return;
+    turns.push(side);
+    if (side === forbidden) {
+      grow += GROW_PENALTY; penaltyFlash = 0.35;
+      beep(140, 0.18, 'sawtooth', 0.08);
+    } else beep(520, 0.03, 'square', 0.03);
+  }
+  addEventListener('keydown', e => {
+    if (e.repeat) return;
+    const k = e.key.toLowerCase();
+    if (k === 'arrowleft' || k === 'a') { steer(-1); e.preventDefault(); }
+    else if (k === 'arrowright' || k === 'd') { steer(1); e.preventDefault(); }
+    else if (k === 'p' || k === 'escape') { if (state === 'playing') state = 'paused'; else if (state === 'paused') state = 'playing'; }
+    else if ((k === ' ' || k === 'enter') && (state === 'ready' || state === 'paused')) { state = 'playing'; e.preventDefault(); }
+  });
+  btnL.addEventListener('pointerdown', e => { e.preventDefault(); steer(-1); });
+  btnR.addEventListener('pointerdown', e => { e.preventDefault(); steer(1); });
+  cv.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const r = cv.getBoundingClientRect();
+    steer(e.clientX - r.left < r.width / 2 ? -1 : 1);
+  });
+  addEventListener('blur', () => { if (state === 'playing') state = 'paused'; });
+
+  // ---- Game logic ----
+  function hit(msg) {
+    hitMsg = msg; state = 'hit'; hitTimer = HIT_PAUSE;
+    beep(90, 0.4, 'sawtooth', 0.1);
+  }
+
+  function step() {
+    if (turns.length) dir = (dir + turns.shift() + 4) % 4;
+    const h = snake[0], nx = h.x + DIRS[dir][0], ny = h.y + DIRS[dir][1];
+    if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return hit('Hit the wall');
+    const body = grow > 0 ? snake : snake.slice(0, -1);
+    if (body.some(s => s.x === nx && s.y === ny)) return hit('Bit yourself');
+    snake.unshift({ x: nx, y: ny });
+    if (grow > 0) grow--; else snake.pop();
+  }
+
+  function difficulty() { return Math.min(1, elapsed / 90); }
+
+  function spawn() {
+    const d = difficulty();
+    const w = 1 + Math.floor(Math.random() * (1 + d * 3));
+    obstacles.push({
+      x: Math.floor(Math.random() * (COLS - w + 1)), y: -1, w,
+      v: 2.5 + d * 4 + Math.random() * 1.5,
+    });
+  }
+
+  function overlapsSnake(o) {
+    const m = 0.15; // a little forgiveness
+    return snake.some(s => o.x + m < s.x + 1 && o.x + o.w - m > s.x && o.y + m < s.y + 1 && o.y + 1 - m > s.y);
+  }
+
+  function update(dt) {
+    if (penaltyFlash > 0) penaltyFlash -= dt;
+    if (state === 'hit') {
+      hitTimer -= dt;
+      if (hitTimer <= 0) reset();
+      return;
+    }
+    if (state !== 'playing') return;
+
+    elapsed += dt;
+    swapTimer -= dt;
+    if (swapTimer <= 0) { forbidden = -forbidden; swapTimer = SWAP_EVERY; beep(880, 0.12, 'triangle', 0.08); }
+
+    moveAcc += dt;
+    while (moveAcc >= MOVE_TIME && state === 'playing') { moveAcc -= MOVE_TIME; step(); }
+    if (state !== 'playing') return;
+
+    spawnAcc -= dt;
+    if (spawnAcc <= 0) { spawn(); spawnAcc = 1.1 - difficulty() * 0.75 + Math.random() * 0.3; }
+
+    for (const o of obstacles) o.y += o.v * dt;
+    for (const o of obstacles) if (overlapsSnake(o)) return hit('Hit by an obstacle');
+    const before = obstacles.length;
+    obstacles = obstacles.filter(o => o.y < ROWS);
+    const dodged = before - obstacles.length;
+    if (dodged) {
+      score += dodged;
+      if (score > best) { best = score; try { localStorage.setItem('snakeDodgeBest', best); } catch (e) {} }
+    }
+  }
+
+  // ---- Rendering ----
+  let cell = 20, pad = 6;
+  function resize() {
+    const availW = innerWidth - 32, availH = innerHeight - 250;
+    cell = Math.max(10, Math.floor(Math.min(availW / COLS, availH / ROWS)));
+    const w = COLS * cell + pad * 2, h = ROWS * cell + pad * 2, dpr = devicePixelRatio || 1;
+    cv.width = w * dpr; cv.height = h * dpr;
+    cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener('resize', resize);
+
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); }
+
+  function draw() {
+    const W = COLS * cell, H = ROWS * cell;
+    ctx.fillStyle = '#0d0f13';
+    ctx.fillRect(0, 0, W + pad * 2, H + pad * 2);
+    // border
+    ctx.fillStyle = state === 'hit' ? '#7a2620' : '#3a4050';
+    rr(0, 0, W + pad * 2, H + pad * 2, 6);
+    ctx.fillStyle = '#171a21';
+    ctx.fillRect(pad, pad, W, H);
+
+    ctx.save();
+    ctx.translate(pad, pad);
+    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+
+    // grid
+    ctx.fillStyle = '#1d2129';
+    for (let x = 0; x < COLS; x++) for (let y = 0; y < ROWS; y++) if ((x + y) % 2) ctx.fillRect(x * cell, y * cell, cell, cell);
+
+    // obstacles
+    for (const o of obstacles) {
+      ctx.fillStyle = '#ffb838';
+      rr(o.x * cell + 1, o.y * cell + 1, o.w * cell - 2, cell - 2, 3);
+      ctx.fillStyle = 'rgba(0,0,0,.25)';
+      ctx.fillRect(o.x * cell + 3, o.y * cell + cell * 0.65, o.w * cell - 6, 2);
+    }
+
+    // snake
+    const flash = penaltyFlash > 0 && Math.floor(penaltyFlash * 20) % 2 === 0;
+    snake.forEach((s, i) => {
+      const t = i / Math.max(1, snake.length - 1);
+      ctx.fillStyle = flash || state === 'hit' ? '#ff5a4e' : i === 0 ? '#a6f5b5' : `hsl(135, 65%, ${58 - t * 22}%)`;
+      const inset = i === 0 ? 1 : 2;
+      rr(s.x * cell + inset, s.y * cell + inset, cell - inset * 2, cell - inset * 2, i === 0 ? cell * 0.35 : cell * 0.25);
+    });
+    // eyes
+    const h = snake[0], [dx, dy] = DIRS[dir];
+    const cx = h.x * cell + cell / 2, cy = h.y * cell + cell / 2;
+    ctx.fillStyle = '#14161b';
+    for (const sgn of [-1, 1]) {
+      ctx.beginPath();
+      ctx.arc(cx + dx * cell * 0.18 + -dy * sgn * cell * 0.2, cy + dy * cell * 0.18 + dx * sgn * cell * 0.2, Math.max(1.5, cell * 0.08), 0, 7);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // overlays
+    const my = pad + H * 0.36;
+    const msg = state === 'ready' ? ['Snake Dodge', 'Press ← / → or tap to start']
+      : state === 'paused' ? ['Paused', 'Press P or tap to continue']
+      : state === 'hit' ? [hitMsg, 'Score reset'] : null;
+    if (msg) {
+      ctx.fillStyle = 'rgba(10,12,16,.62)';
+      ctx.fillRect(pad, pad, W, H);
+      ctx.textAlign = 'center'; ctx.fillStyle = state === 'hit' ? '#ff5a4e' : '#e9ecf1';
+      ctx.font = `600 ${Math.max(18, cell * 1.2)}px system-ui, sans-serif`;
+      ctx.fillText(msg[0], pad + W / 2, my - cell * 0.4);
+      ctx.fillStyle = '#c3c9d4';
+      ctx.font = `${Math.max(12, cell * 0.6)}px system-ui, sans-serif`;
+      ctx.fillText(msg[1], pad + W / 2, my + cell * 0.8);
+      if (state === 'ready') {
+        const side = forbidden < 0 ? 'LEFT' : 'RIGHT';
+        ctx.fillStyle = '#ff5a4e';
+        ctx.fillText(`Avoid pressing ${side}: it makes you grow`, pad + W / 2, my + cell * 2);
+      }
+    }
+  }
+
+  function hud() {
+    scoreEl.textContent = score;
+    bestEl.textContent = best;
+    lenEl.textContent = snake.length + grow;
+    const warn = state === 'playing' && swapTimer <= SWAP_WARN;
+    const side = forbidden < 0 ? 'LEFT ←' : 'RIGHT →';
+    ruleEl.className = 'rule' + (warn ? ' warn' : '');
+    ruleEl.innerHTML = warn
+      ? `Forbidden side swaps in ${Math.ceil(swapTimer)}…`
+      : `Don't press <strong>${side}</strong> — it grows the snake (swaps in ${Math.ceil(swapTimer)}s)`;
+    for (const [b, s] of [[btnL, -1], [btnR, 1]]) {
+      b.classList.toggle('forbidden', s === forbidden);
+      b.classList.toggle('warn', warn && s === forbidden);
+      b.querySelector('small').textContent = s === forbidden ? `+${GROW_PENALTY} LENGTH` : s < 0 ? 'LEFT' : 'RIGHT';
+    }
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    update(dt); draw(); hud();
+    requestAnimationFrame(frame);
+  }
+
+  reset(); resize(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
