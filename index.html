@@ -48,6 +48,12 @@
   .controls button.forbidden small { color: #fff; }
   .controls button.forbidden.warn { animation: blink .3s steps(2) infinite; }
   .controls button:active { transform: translateY(1px); }
+  /* a key that is switched off for a moment, without warning */
+  .controls button.off { background: #0d0f13; border-color: #2a2e38; color: #4a5060; box-shadow: none;
+    text-decoration: line-through; animation: none; }
+  .controls button.off small { color: #6b7180; }
+  .controls button.off.jolt { animation: jolt .25s; }
+  @keyframes jolt { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
   .help { font-size: 12px; color: var(--mut); }
   a { color: var(--mut); }
 </style>
@@ -82,6 +88,8 @@
   const GROW_PENALTY = 3;      // segments added when pressing the forbidden side
   const MOVE_TIME = 0.14;      // seconds per snake step
   const SWAP_MIN = 4, SWAP_MAX = 8;   // seconds before the forbidden key changes (random in range)
+  const OFF_EVERY = () => 4 + Math.random() * 7; // seconds until a key is suddenly switched off
+  const OFF_TIME = () => 0.9 + Math.random() * 0.5; // ...and for how long
   const SWAP_WARN = 1.5;       // seconds of warning before it changes
   const RB_SPEED = 1.6;        // red button speed, cells/second (it homes in on the head)
   const RB_REACH = 3;        // how close the head must get before the arm presses it
@@ -107,6 +115,7 @@
   let snake, dir, turns, grow, obstacles, score, state, moveAcc, spawnAcc, elapsed;
   let forbidden = Math.floor(Math.random() * 4), swapTimer = 0;
   let hitTimer = 0, penaltyFlash = 0, hitMsg = '';
+  let offKey = -1, offTimer = 0; // offKey: the key that is switched off right now (-1 = none)
   let rb = null, rbTimer = 0, armT = 0, rickT = 0, sparks = [];
   const swapIn = () => SWAP_MIN + Math.random() * (SWAP_MAX - SWAP_MIN);
   function newForbidden() {
@@ -121,6 +130,7 @@
     dir = 1; turns = []; grow = 0; obstacles = [];
     score = 0; moveAcc = 0; spawnAcc = 0.6; elapsed = 0;
     swapTimer = swapIn();
+    offKey = -1; offTimer = OFF_EVERY();
     rb = null; rbTimer = 3 + Math.random() * 3;
     state = 'ready';
   }
@@ -184,6 +194,12 @@
   function press(k) {
     if (state === 'ready' || state === 'paused') { state = 'playing'; return; }
     if (state !== 'playing') return;
+    if (k === offKey) { // switched off: nothing happens, just a dead clunk
+      beep(70, 0.07, 'square', 0.05);
+      const b = btns.find(b => +b.dataset.k === k);
+      b.classList.remove('jolt'); void b.offsetWidth; b.classList.add('jolt');
+      return;
+    }
     if (k === forbidden) {
       grow += GROW_PENALTY; penaltyFlash = 0.35;
       beep(140, 0.18, 'sawtooth', 0.08); // it still steers, but you pay for it
@@ -294,6 +310,13 @@
 
     elapsed += dt;
     swapTimer -= dt;
+    offTimer -= dt;
+    if (offTimer <= 0) {
+      if (offKey < 0) { // out of nowhere: switch off a key that is not the forbidden one
+        do offKey = Math.floor(Math.random() * 4); while (offKey === forbidden);
+        offTimer = OFF_TIME();
+      } else { offKey = -1; offTimer = OFF_EVERY(); }
+    }
     if (swapTimer <= 0) { newForbidden(); beep(880, 0.12, 'triangle', 0.08); }
 
     moveAcc += dt;
@@ -559,7 +582,8 @@
       const k = +b.dataset.k;
       b.classList.toggle('forbidden', k === forbidden);
       b.classList.toggle('warn', warn && k === forbidden);
-      b.querySelector('small').textContent = k === forbidden ? `+${GROW_PENALTY}` : '↑→↓←'[k];
+      b.classList.toggle('off', k === offKey);
+      b.querySelector('small').textContent = k === offKey ? 'OFF' : k === forbidden ? `+${GROW_PENALTY}` : '↑→↓←'[k];
     }
   }
 
