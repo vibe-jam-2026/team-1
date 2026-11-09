@@ -97,7 +97,10 @@
   // ---- Tunables (we will iterate on these) ----
   const COLS = 36, ROWS = 24;
   const START_LEN = 4;
-  const GROW_PENALTY = 3;      // segments added when pressing the forbidden key
+  // Pressing the red key gives a random punishment: grow, speed up or slow down.
+  const GROW_PENALTY = 3;      // segments added
+  const FAST_TIME = 3, SLOW_TIME = 3;  // seconds of extra speed / slowness
+  const FAST_FACTOR = 0.55, SLOW_FACTOR = 1.9; // step time multipliers
   const MOVE_TIME = 0.14;      // seconds per snake step
   // The forbidden key comes and goes: a while with every key safe, then one key is red for a moment.
   const SAFE_TIME = () => 4 + Math.random() * 2;      // seconds with no forbidden key (about 5)
@@ -133,7 +136,7 @@
   let snake, dir, turns, grow, obstacles, score, state, moveAcc, spawnAcc, elapsed;
   let forbidden = -1, swapTimer = 0; // forbidden: the red key right now (-1 = none)
   let hitTimer = 0, penaltyFlash = 0, hitMsg = '';
-  let items = [], puTimer = 0, shieldT = 0, turboT = 0, bombFlash = 0;
+  let items = [], puTimer = 0, shieldT = 0, turboT = 0, slowT = 0, bombFlash = 0;
   let fx = [], debris = [], popups = [], snip = null; // particles, cut-off tail pieces, floating texts, scissors animation
   let offKey = -1, offTimer = 0; // offKey: the key that is switched off right now (-1 = none)
   let rb = null, rbTimer = 0, armT = 0, rickT = 0, sparks = [];
@@ -153,7 +156,7 @@
     forbidden = -1; swapTimer = SAFE_TIME(); // every key is safe at the start
     offKey = -1; offTimer = OFF_EVERY();
     rb = null; rbTimer = 3 + Math.random() * 3;
-    items = []; puTimer = 2 + Math.random() * 3; shieldT = 0; turboT = 0;
+    items = []; puTimer = 2 + Math.random() * 3; shieldT = 0; turboT = 0; slowT = 0;
     debris = []; snip = null;
     state = 'ready';
   }
@@ -224,11 +227,27 @@
       return;
     }
     if (k === forbidden) {
-      grow += GROW_PENALTY; penaltyFlash = 0.35;
-      beep(140, 0.18, 'sawtooth', 0.08); // it still steers, but you pay for it
+      punish(); // it still steers, but you pay for it
     } else beep(520, 0.03, 'square', 0.03);
     const lastDir = turns.length ? turns[turns.length - 1] : dir;
     if (k !== lastDir && k !== (lastDir + 2) % 4 && turns.length < 2) turns.push(k);
+  }
+  function punish() {
+    const h = snake[0], x = h.x + 0.5, y = h.y + 0.5, roll = Math.floor(Math.random() * 3);
+    penaltyFlash = 0.35;
+    if (roll === 0) {
+      grow += GROW_PENALTY;
+      beep(140, 0.18, 'sawtooth', 0.08);
+      popup(x, y, `+${GROW_PENALTY} LENGTH`, '#ff5a4e');
+    } else if (roll === 1) {
+      turboT = FAST_TIME; slowT = 0;
+      beep(300, 0.08, 'sawtooth', 0.07); setTimeout(() => beep(700, 0.12, 'sawtooth', 0.07), 70);
+      popup(x, y, 'SPEED UP!', '#ff9f43');
+    } else {
+      slowT = SLOW_TIME; turboT = 0;
+      beep(400, 0.12, 'sawtooth', 0.07); setTimeout(() => beep(150, 0.25, 'sawtooth', 0.07), 100);
+      popup(x, y, 'SLOW DOWN!', '#7aa2ff');
+    }
   }
   const KEYMAP = { w: 0, arrowup: 0, d: 1, arrowright: 1, s: 2, arrowdown: 2, a: 3, arrowleft: 3 };
   addEventListener('keydown', e => {
@@ -314,7 +333,7 @@
         beep(660, 0.08, 'triangle', 0.08); setTimeout(() => beep(990, 0.12, 'triangle', 0.08), 80);
         popup(x, y, 'SHIELD!', '#46d4ff');
       } else { // fake shield: the snake goes into turbo
-        turboT = TURBO_TIME;
+        turboT = TURBO_TIME; slowT = 0;
         beep(300, 0.1, 'sawtooth', 0.07); setTimeout(() => beep(600, 0.15, 'sawtooth', 0.07), 90);
         popup(x, y, 'TRAP! TURBO!', '#ff5a4e');
       }
@@ -433,11 +452,12 @@
 
     if (shieldT > 0) shieldT -= dt;
     if (turboT > 0) turboT -= dt;
+    if (slowT > 0) slowT -= dt;
     for (const it of items) { it.life -= dt; it.t += dt; }
     items = items.filter(it => it.life > 0);
     if ((puTimer -= dt) <= 0) { if (items.length < PU_MAX) spawnItem(); puTimer = PU_EVERY(); }
 
-    const moveTime = turboT > 0 ? MOVE_TIME * 0.55 : MOVE_TIME;
+    const moveTime = MOVE_TIME * (turboT > 0 ? FAST_FACTOR : slowT > 0 ? SLOW_FACTOR : 1);
     moveAcc += dt;
     while (moveAcc >= moveTime && state === 'playing') { moveAcc -= moveTime; step(); }
     if (state !== 'playing') return;
@@ -619,7 +639,8 @@
     // active effect timers in the corner
     const status = [];
     if (shieldT > 0) status.push(['SHIELD', shieldT, '#46d4ff']);
-    if (turboT > 0) status.push(['TURBO', turboT, '#ff5a4e']);
+    if (turboT > 0) status.push(['TURBO', turboT, '#ff9f43']);
+    if (slowT > 0) status.push(['SLOW', slowT, '#7aa2ff']);
     status.forEach(([name, t, c], i) => {
       const fs = Math.max(11, cell * 0.5), y = cell * 0.4 + i * fs * 1.9;
       ctx.font = `800 ${fs}px system-ui, sans-serif`; ctx.textAlign = 'left';
@@ -658,7 +679,7 @@
       ctx.fillText(msg[1], pad + W / 2, my + cell * 0.8);
       if (state === 'ready') {
         ctx.fillStyle = '#ff5a4e';
-        ctx.fillText(`When a key turns red, don't press it: it makes you grow`, pad + W / 2, my + cell * 2);
+        ctx.fillText(`Red key? Don't press it: you grow, speed up or slow down`, pad + W / 2, my + cell * 2);
       }
     }
   }
@@ -843,7 +864,7 @@
       const k = +b.dataset.k;
       b.classList.toggle('forbidden', k === forbidden);
       b.classList.toggle('off', k === offKey);
-      b.querySelector('small').textContent = k === offKey ? 'OFF' : k === forbidden ? `+${GROW_PENALTY}` : '↑→↓←'[k];
+      b.querySelector('small').textContent = k === offKey ? 'OFF' : k === forbidden ? 'DON\'T' : '↑→↓←'[k];
     }
   }
 
