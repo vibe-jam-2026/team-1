@@ -93,6 +93,7 @@
     toSpawn = HEAD_COUNT; spawnTimer = 1.2; bananaTimer = 0; shake = 0; flash = 0; button = null; tempt = 0;
     phase = 'intro'; phaseT = 0; beatAt = 0;
     sfx('sting'); setTimeout(() => { if (!ended && phase !== 'lose') SFX.music('maze'); }, 1500);
+    voice = 'off'; voiceQueue = 0; startVoice();
     for (let i = 0; i < 8; i++) spawnBanana();
     computeDist();
     last = performance.now();
@@ -102,6 +103,7 @@
   function finish(result) {
     if (ended) return;
     ended = true;
+    stopVoice();
     removeEventListener('keydown', onKey, true);
     removeEventListener('resize', resize);
     SFX.music(null);
@@ -206,12 +208,56 @@
   }
 
   // ---- Throwing bananas ----
-  function throwBanana() {
-    if (phase !== 'play' || P.ammo <= 0 || P.cd > 0) { if (phase === 'play' && P.ammo <= 0) sfx('clunk'); return; }
-    P.ammo--; P.cd = THROW_COOLDOWN;
+  function throwBanana(free = false) {
+    if (phase !== 'play' || (!free && P.ammo <= 0) || P.cd > 0) { if (phase === 'play' && !free && P.ammo <= 0) sfx('clunk'); return false; }
+    if (!free) P.ammo--;
+    P.cd = THROW_COOLDOWN;
     const p = pos(P);
     thrown.push({ x: p.x, y: p.y, dir: P.dir, rot: 0 });
     sfx('swoosh');
+    return true;
+  }
+
+  // ---- Voice: say "banana" and the snake throws one (free) ----
+  // Uses the browser's speech recognition (Chrome, Edge, Safari). Each "banana" heard is queued and
+  // thrown as soon as the throw cooldown allows, so "banana banana banana" throws three.
+  let rec = null, voice = 'off', voiceQueue = 0, heard = {};
+  function startVoice() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { voice = 'unsupported'; return; }
+    try {
+      rec = new SR();
+      rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 3;
+      rec.onstart = () => { if (voice !== 'denied') voice = 'on'; };
+      rec.onresult = e => {
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          // count the word in this phrase (interim results grow as you speak; only new ones count)
+          let n = 0;
+          for (let a = 0; a < e.results[i].length; a++) n = Math.max(n, (e.results[i][a].transcript.match(/banan/gi) || []).length);
+          const before = heard[i] || 0;
+          if (n > before) { voiceQueue += n - before; heard[i] = n; }
+        }
+      };
+      rec.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') voice = 'denied'; };
+      rec.onend = () => { // the browser stops listening now and then: start again while the maze is on
+        heard = {};
+        if (rec && !ended && voice !== 'denied') setTimeout(() => { try { rec && rec.start(); } catch (e) {} }, 250);
+      };
+      rec.start();
+      voice = 'starting';
+    } catch (e) { voice = 'unsupported'; }
+  }
+  function stopVoice() {
+    const r = rec; rec = null;
+    if (r) { r.onend = null; try { r.abort(); } catch (e) {} }
+  }
+  function updateVoice() {
+    if (phase !== 'play') { voiceQueue = 0; return; }
+    if (voiceQueue > 0 && P.cd <= 0 && throwBanana(true)) {
+      voiceQueue--;
+      const p = pos(P);
+      popText(p.x + 0.5, p.y - 0.3, 'BANANA!', '#ffe14d');
+    }
   }
 
   function updateThrown(dt) {
@@ -328,6 +374,7 @@
       if (phase === 'play') updatePlayer(dt);
       if (phase === 'play' && toSpawn > 0 && (spawnTimer -= dt) <= 0) { spawnHead(); toSpawn--; spawnTimer = 1.0; }
       if (phase === 'play') { updateHeads(dt); updateThrown(dt); }
+      updateVoice();
       if ((bananaTimer -= dt) <= 0) { if (bananas.length < BANANAS_MAX) spawnBanana(); bananaTimer = 0.9; }
       if (phase === 'play' && toSpawn === 0 && heads.length === 0) { phase = 'cleared'; phaseT = 0; SFX.music(null); sfx('fanfare'); }
     }
@@ -477,8 +524,16 @@
     ctx.fillText(`HEADS LEFT: ${heads.length + toSpawn}`, W / 2, 26);
     ctx.textAlign = 'right'; ctx.fillStyle = '#ffe14d';
     ctx.fillText(`BANANAS TO THROW: ${P.ammo}`, W - 20, 26);
+    // microphone status
+    const mic = { on: ['MIC ON · say "BANANA" to throw one', '#7cff8a'], starting: ['MIC · allow the microphone to throw by voice', '#ffd23f'],
+      denied: ['MIC BLOCKED · allow the microphone to throw by voice', '#ff8a80'], unsupported: ['Voice throwing needs Chrome, Edge or Safari', '#8a93a3'] }[voice];
+    if (mic) {
+      ctx.textAlign = 'left'; ctx.font = '700 12px system-ui, sans-serif'; ctx.fillStyle = mic[1];
+      if (voice === 'on') { ctx.beginPath(); ctx.arc(24, 50, 4 + Math.sin(performance.now() / 200), 0, 7); ctx.fill(); }
+      ctx.fillText(mic[0], 34, 50);
+    }
     ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('W A S D move · SPACE throws a banana · every banana you eat also drops a peel behind you · M mute', W / 2, H - 8);
+    ctx.fillText('W A S D move · SPACE (or say "banana") throws a banana · every banana you eat also drops a peel behind you · M mute', W / 2, H - 8);
   }
 
   function drawCard(title, sub, color, a, kicker) {
