@@ -247,7 +247,7 @@
 
   // ---- Input ----
   function press(k) {
-    if (state === 'ready' || state === 'paused') { if (state === 'ready') sfx('start'); state = 'playing'; return; }
+    if (state === 'ready' || state === 'paused') { if (state === 'ready') begin(); state = 'playing'; return; }
     if (state !== 'playing') return;
     if (k === offKey) { // switched off: nothing happens, just a dead clunk
       sfx('clunk');
@@ -278,6 +278,9 @@
       popup(x, y, 'SLOW DOWN!', '#7aa2ff');
     }
   }
+  // starting (or coming back to) level 1
+  let levelBanner = 0;
+  function begin() { sfx('start'); levelBanner = 2; }
   const KEYMAP = { w: 0, arrowup: 0, d: 1, arrowright: 1, s: 2, arrowdown: 2, a: 3, arrowleft: 3 };
   addEventListener('keydown', e => {
     if (e.repeat) return;
@@ -288,7 +291,7 @@
       try { if (player && playerReady) SFX.muted ? player.mute() : player.unMute(); } catch (e) {}
     }
     else if (k === 'p' || k === 'escape') { if (state === 'playing') state = 'paused'; else if (state === 'paused') state = 'playing'; }
-    else if ((k === ' ' || k === 'enter') && (state === 'ready' || state === 'paused')) { if (state === 'ready') sfx('start'); state = 'playing'; e.preventDefault(); }
+    else if ((k === ' ' || k === 'enter') && (state === 'ready' || state === 'paused')) { if (state === 'ready') begin(); state = 'playing'; e.preventDefault(); }
   });
   for (const b of btns) b.addEventListener('pointerdown', e => { e.preventDefault(); press(+b.dataset.k); });
   cv.addEventListener('pointerdown', e => {
@@ -478,6 +481,7 @@
 
   function update(dt) {
     if (penaltyFlash > 0) penaltyFlash -= dt;
+    if (levelBanner > 0 && state === 'playing') levelBanner -= dt;
     if (state !== 'paused') updateEffects(dt);
     if (state === 'hit') {
       hitTimer -= dt;
@@ -729,7 +733,21 @@
       if (state === 'ready') {
         ctx.fillStyle = '#ff5a4e';
         ctx.fillText(`Red key? Don't press it: you grow, speed up or slow down`, pad + W / 2, my + cell * 2);
+        ctx.fillStyle = '#ffd23f'; ctx.font = `800 ${Math.max(12, cell * 0.6)}px system-ui, sans-serif`;
+        ctx.fillText('LEVEL 1 · THE SNAKE', pad + W / 2, my - cell * 2.1);
       }
+    }
+    if (levelBanner > 0 && state === 'playing') { // "LEVEL 1" fades out once you're moving
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, levelBanner / 0.6) * Math.min(1, (2 - levelBanner) / 0.2);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `900 ${Math.max(28, cell * 2.2)}px system-ui, sans-serif`;
+      ctx.lineWidth = 8; ctx.strokeStyle = '#0d0f13'; ctx.strokeText('LEVEL 1', pad + W / 2, pad + H * 0.3);
+      ctx.fillStyle = '#ffd23f'; ctx.fillText('LEVEL 1', pad + W / 2, pad + H * 0.3);
+      ctx.font = `800 ${Math.max(14, cell * 0.8)}px system-ui, sans-serif`;
+      ctx.lineWidth = 6; ctx.strokeText('THE SNAKE · dodge the falling blocks', pad + W / 2, pad + H * 0.3 + cell * 1.8);
+      ctx.fillStyle = '#fff'; ctx.fillText('THE SNAKE · dodge the falling blocks', pad + W / 2, pad + H * 0.3 + cell * 1.8);
+      ctx.restore();
     }
   }
 

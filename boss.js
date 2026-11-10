@@ -797,7 +797,9 @@
       const k = clamp01(phaseT / 0.4);
       ctx.fillStyle = `rgba(7,4,13,${0.55 * (1 - clamp01((phaseT - 1.9) / 0.5))})`; ctx.fillRect(0, 0, W, H);
       ctx.save(); ctx.translate(W / 2, H * 0.36); ctx.scale(k, k);
-      ctx.textAlign = 'center'; ctx.fillStyle = '#ff3b30'; ctx.font = '900 64px system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.fillStyle = '#ffd23f'; ctx.font = '900 30px system-ui, sans-serif';
+      ctx.fillText('LEVEL 2', 0, -64);
+      ctx.fillStyle = '#ff3b30'; ctx.font = '900 64px system-ui, sans-serif';
       ctx.fillText('FINAL BOSS', 0, 0);
       ctx.fillStyle = '#fff'; ctx.font = '700 24px system-ui, sans-serif';
       ctx.fillText('Slam Rick before he slams you', 0, 50);
@@ -809,6 +811,9 @@
       ctx.save(); ctx.translate(W / 2, H * 0.3); ctx.scale(s, s); ctx.rotate(Math.sin(phaseT * 20) * 0.02);
       ctx.globalAlpha = clamp01(k / 0.3);
       ctx.textAlign = 'center'; ctx.font = '900 60px system-ui, sans-serif';
+      ctx.font = '900 26px system-ui, sans-serif'; ctx.lineWidth = 6; ctx.strokeStyle = '#120818';
+      ctx.strokeText('NEXT: LEVEL 3', 0, -58); ctx.fillStyle = '#ffd23f'; ctx.fillText('NEXT: LEVEL 3', 0, -58);
+      ctx.font = '900 60px system-ui, sans-serif';
       ctx.lineWidth = 8; ctx.strokeStyle = '#120818'; ctx.strokeText('THE FINAL FINAL BOSS', 0, 0);
       ctx.fillStyle = '#ff3b30'; ctx.fillText('THE FINAL FINAL BOSS', 0, 0);
       ctx.font = '700 22px system-ui, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText("It's not over. It's never over.", 0, 44);
