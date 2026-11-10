@@ -32,6 +32,7 @@
   const BANANAS_MAX = 10, PEELS_MAX = 16;
   const POCKET_MAX = 9;                // bananas you can carry to throw
   const THROW_SPEED = 13, THROW_COOLDOWN = 0.25;
+  const VOICE_STUN = 2.5;              // saying "banana" stuns every head in place for this long
   const BUTTON_WAIT = 12;              // seconds of leaving the final button alone to truly win
 
   const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up, right, down, left
@@ -44,6 +45,7 @@
   let root, cv, ctx, raf, last, done, ended, beatAt;
   let T, ox, oy;                       // tile size and maze offset on screen
   let thrown = []; // bananas flying through the corridors
+  let waves = [];  // shockwaves from shouting "banana"
   let P, heads, bananas, peels, fx, texts, phase, phaseT, bananaTimer, toSpawn, spawnTimer, dist, shake, flash, button, tempt;
 
   // ---- Sound (sfx.js) ----
@@ -88,7 +90,7 @@
 
     const s = find('P')[0];
     P = { x: s.x, y: s.y, dir: 3, want: 3, moving: false, prog: 0, hp: LIVES, inv: 0, peels: 0, ammo: 2, cd: 0, trail: [], t: 0 };
-    thrown = [];
+    thrown = []; waves = [];
     heads = []; bananas = []; peels = []; fx = []; texts = [];
     toSpawn = HEAD_COUNT; spawnTimer = 1.2; bananaTimer = 0; shake = 0; flash = 0; button = null; tempt = 0;
     phase = 'intro'; phaseT = 0; beatAt = 0;
@@ -266,7 +268,19 @@
       voiceQueue--;
       const p = pos(P);
       popText(p.x + 0.5, p.y - 0.3, 'BANANA!', '#ffe14d');
+      stunAllHeads(p);
     }
+  }
+
+  // The power of the word: every head freezes in place, dizzy, for VOICE_STUN seconds.
+  function stunAllHeads(from) {
+    waves.push({ x: from.x, y: from.y, t: 0 });
+    for (const h of heads) {
+      h.stun = Math.max(h.stun, VOICE_STUN);
+      const q = pos(h); burst(q.x + 0.5, q.y + 0.5, 8, ['#ffe14d', '#fff'], 4);
+    }
+    sfx('boing'); setTimeout(() => sfx('tweet'), 250);
+    shake = Math.max(shake, 5);
   }
 
   function updateThrown(dt) {
@@ -294,7 +308,7 @@
 
   // A head takes 1 damage, spins dizzy for a moment, and pops when it runs out.
   function damageHead(h, label) {
-    h.hp--; h.stun = 1.1; h.hurt = 0.4;
+    h.hp--; h.stun = Math.max(h.stun, 1.1); h.hurt = 0.4;
     sfx(label === 'SLIP!' ? 'slip' : 'hit'); setTimeout(() => sfx(h.hp > 0 ? 'oof' : 'bigPop'), label === 'SLIP!' ? 350 : 120);
     burst(h.x + 0.5, h.y + 0.5, 10, ['#ffe14d', '#fff'], 5);
     popText(h.x + 0.5, h.y, h.hp > 0 ? label : 'POP!', h.hp > 0 ? '#ffe14d' : '#fff');
@@ -384,6 +398,8 @@
       if (phase === 'play' && toSpawn > 0 && (spawnTimer -= dt) <= 0) { spawnHead(); toSpawn--; spawnTimer = 1.0; }
       if (phase === 'play') { updateHeads(dt); updateThrown(dt); }
       updateVoice();
+      for (const w of waves) w.t += dt;
+      waves = waves.filter(w => w.t < 0.9);
       if ((bananaTimer -= dt) <= 0) { if (bananas.length < BANANAS_MAX) spawnBanana(); bananaTimer = 0.9; }
       if (phase === 'play' && toSpawn === 0 && heads.length === 0) { phase = 'cleared'; phaseT = 0; SFX.music(null); sfx('fanfare'); }
     }
@@ -434,6 +450,12 @@
     ctx.globalAlpha = 1;
     ctx.restore();
     if (flash > 0) { ctx.fillStyle = `rgba(255,60,50,${flash})`; ctx.fillRect(0, 0, W, H); }
+    for (const w of waves) { // the shout ripples out across the whole maze
+      const k = w.t / 0.9;
+      ctx.strokeStyle = `rgba(255,225,77,${1 - k})`; ctx.lineWidth = 10 * (1 - k) + 2;
+      ctx.beginPath(); ctx.arc(sx(w.x), sy(w.y), 20 + k * W * 0.8, 0, 7); ctx.stroke();
+      if (w.t < 0.15) { ctx.fillStyle = `rgba(255,225,77,${0.25 * (1 - w.t / 0.15)})`; ctx.fillRect(0, 0, W, H); }
+    }
     drawHUD();
     if (phase === 'intro') drawCard('THE FINAL FINAL BOSS', 'Eat bananas, drop peels, throw bananas with SPACE.', '#ff3b30', clamp01(phaseT / 0.3) * clamp01((2.6 - phaseT) / 0.4), 'LEVEL 3');
     if (phase === 'cleared') drawCard('ALL HEADS DOWN!', 'You did it. Time for your reward...', '#5ee07a', clamp01(phaseT / 0.3));
@@ -534,7 +556,7 @@
     ctx.textAlign = 'right'; ctx.fillStyle = '#ffe14d';
     ctx.fillText(`BANANAS TO THROW: ${P.ammo}`, W - 20, 26);
     // microphone status
-    const mic = { on: ['MIC ON · say "BANANA" to throw one', '#7cff8a'], starting: ['MIC · allow the microphone to throw by voice', '#ffd23f'],
+    const mic = { on: ['MIC ON · say "BANANA" to throw one and stun every head', '#7cff8a'], starting: ['MIC · allow the microphone to throw by voice', '#ffd23f'],
       denied: ['MIC BLOCKED · allow the microphone to throw by voice', '#ff8a80'], unsupported: ['Voice throwing needs Chrome, Edge or Safari', '#8a93a3'] }[voice];
     if (mic) {
       ctx.textAlign = 'left'; ctx.font = '700 12px system-ui, sans-serif'; ctx.fillStyle = mic[1];
@@ -542,7 +564,7 @@
       ctx.fillText(mic[0], 34, 50);
     }
     ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('W A S D move · SPACE (or say "banana") throws a banana · every banana you eat also drops a peel behind you · M mute', W / 2, H - 8);
+    ctx.fillText('W A S D move · SPACE throws a banana (say "banana" to also stun every head) · every banana you eat also drops a peel behind you · M mute', W / 2, H - 8);
   }
 
   function drawCard(title, sub, color, a, kicker) {
