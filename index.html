@@ -294,9 +294,19 @@
   let levelBanner = 0;
   function begin() { sfx('start'); levelBanner = 2; }
   const KEYMAP = { w: 0, arrowup: 0, d: 1, arrowright: 1, s: 2, arrowdown: 2, a: 3, arrowleft: 3 };
+  // Hidden developer key "1": skip to the next level (here: a blue button appears and gets slammed).
+  function devSkip() {
+    if (!['ready', 'playing', 'paused', 'rick'].includes(state)) return;
+    const h = snake[0];
+    buttons.blue = { x: Math.min(COLS - 1, Math.max(1, h.x + 2.5)), y: Math.max(1, h.y - 1.5), life: RB_LIFE, blue: true };
+    rb = buttons.blue; state = 'arm'; armT = 0; levelBanner = 0;
+    sfx('whoosh');
+  }
+
   addEventListener('keydown', e => {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
+    if (k === '1') return devSkip();
     if (k in KEYMAP) { press(KEYMAP[k]); e.preventDefault(); }
     else if (k === 'm') {
       SFX.toggleMute(); muteEl.textContent = SFX.muted ? 'M to unmute' : 'M to mute'; // game sounds only, never the video

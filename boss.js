@@ -137,6 +137,7 @@
     // the boss fight owns the keyboard while it runs; the snake game underneath must not react
     e.stopImmediatePropagation();
     if (e.type === 'keydown' && e.key.toLowerCase() === 'm' && !e.repeat) return SFX.toggleMute();
+    if (e.type === 'keydown' && e.key === '1' && !e.repeat) return devSkip(); // hidden developer key
     if (e.type === 'keydown' && (phase === 'win' || phase === 'lose')) { e.preventDefault(); return finish(); }
     if (!k) return;
     e.preventDefault();
@@ -243,6 +244,14 @@
     }
     say(pick(['Ouch!', 'Not the hair!', 'Hey!', 'That hurt!']));
     if (R.st !== 'attack' && R.st !== 'leap') { R.st = 'hurt'; R.stT = 0; }
+  }
+
+  // Hidden developer key "1": Rick is defeated on the spot (on to the head pop and the maze).
+  function devSkip() {
+    if (phase !== 'intro' && phase !== 'fight') return;
+    phase = 'fight';
+    rickSlam = null; R.st = R.st === 'leap' ? 'dance' : R.st; R.y = GY;
+    hitRick(R.hp);
   }
 
   function startRickSlam() {

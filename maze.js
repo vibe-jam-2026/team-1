@@ -139,6 +139,7 @@
     if (k in KEYMAP || k in THROW_KEYS) e.preventDefault();
     if (e.repeat) return;        // a key still held from the maze is not a press
     if (k === 'm') return SFX.toggleMute(); // muting is not pressing the button
+    if (k === '1') return devSkip();        // hidden developer key; never presses the button
     anyInput();
     if (k in KEYMAP) input(KEYMAP[k]);
     else if (k in THROW_KEYS) throwBanana();
@@ -205,6 +206,14 @@
       P.peels--;
       sfx('splat');
     }
+  }
+
+  // Hidden developer key "1": every head pops, on to the final button.
+  function devSkip() {
+    if (phase !== 'intro' && phase !== 'play') return;
+    phase = 'play'; phaseT = 0; toSpawn = 0;
+    for (const h of heads) { h.hp = 1; damageHead(h, 'POP!'); }
+    heads = [];
   }
 
   // ---- Throwing bananas ----
