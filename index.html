@@ -179,32 +179,35 @@
     state = 'ready';
   }
 
-  // ---- Rickroll video ----
-  // The YouTube player is created the first time the red button is slammed, inside the (then visible)
-  // snake box, and reused after that. If YouTube's player script can't load, a plain embed is used instead.
+  // ---- Rickroll video (Vimeo, so there are no ads) ----
+  // The Vimeo player is created the first time the red button is slammed, inside the (then visible)
+  // snake box, and reused after that. If Vimeo's player script can't load, a plain embed is used instead.
   // The video always plays WITH sound, together with the game's sound effects: the M key only mutes the
   // game sounds, and starting the rickroll turns the game sounds back on too.
-  const VIDEO_ID = 'dQw4w9WgXcQ';
-  let rolling = false, player = null, playerReady = false, plainEmbed = null;
+  const VIMEO_ID = 714785167;
+  const VIMEO_OPTS = { autoplay: true, loop: true, muted: false, controls: false, title: false, byline: false,
+    portrait: false, playsinline: true, dnt: true, keyboard: false };
+  let rolling = false, player = null, playerReady = false, plainEmbed = null, needSound = false;
   const api = document.createElement('script');
-  api.src = 'https://www.youtube.com/iframe_api';
+  api.src = 'https://player.vimeo.com/api/player.js';
   document.head.appendChild(api);
 
   function playFromStart() {
-    try {
-      player.seekTo(0, true); player.unMute(); player.setVolume(100); player.playVideo();
-      // If the browser refuses to start it with sound, start it muted for now; the next key press
+    player.setCurrentTime(0).catch(() => {});
+    player.setMuted(false).catch(() => {}); player.setVolume(1).catch(() => {});
+    player.play().catch(() => {
+      // The browser refused to start it with sound: start it muted for now; the next key press
       // or tap (which browsers count as permission) turns the sound on.
-      setTimeout(() => {
-        if (rolling && ![1, 3].includes(player.getPlayerState())) { player.mute(); player.playVideo(); needSound = true; }
-      }, 1500);
-    } catch (e) {}
+      if (!rolling) return;
+      needSound = true;
+      player.setMuted(true).then(() => player.play()).catch(() => {});
+    });
   }
-  let needSound = false;
   function videoSoundOn() {
-    if (!rolling) return;
-    try { if (player && playerReady) { player.unMute(); player.setVolume(100); if (![1, 3].includes(player.getPlayerState())) player.playVideo(); } } catch (e) {}
     needSound = false;
+    if (!rolling || !player || !playerReady) return;
+    player.setMuted(false).catch(() => {}); player.setVolume(1).catch(() => {});
+    player.play().catch(() => {});
   }
   // any key press or tap while the video plays makes sure its sound is on
   addEventListener('keydown', () => { if (rolling && needSound) videoSoundOn(); }, true);
@@ -215,7 +218,7 @@
     const box = document.querySelector('.bgvid');
     box.innerHTML = '';
     plainEmbed = document.createElement('iframe');
-    plainEmbed.allow = 'autoplay; encrypted-media';
+    plainEmbed.allow = 'autoplay; fullscreen; picture-in-picture';
     plainEmbed.title = 'Background video';
     box.appendChild(plainEmbed);
   }
@@ -224,29 +227,26 @@
     rolling = true; document.body.classList.add('rolling');
     if (SFX.muted) { SFX.toggleMute(); muteEl.textContent = 'M to mute'; } // video and game sounds together
     if (player) { if (playerReady) playFromStart(); return; }
-    if (!plainEmbed && window.YT && YT.Player) {
-      player = new YT.Player('rickvid', {
-        videoId: VIDEO_ID, width: '100%', height: '100%',
-        playerVars: { autoplay: 1, controls: 0, disablekb: 1, loop: 1, playlist: VIDEO_ID, playsinline: 1,
-          rel: 0, iv_load_policy: 3, modestbranding: 1, ...(location.protocol.startsWith('http') ? { origin: location.origin } : {}) },
-        events: {
-          onReady: () => { playerReady = true; if (rolling) playFromStart(); },
-          onError: () => { usePlainEmbed(); if (rolling) startRoll(); },
-        },
-      });
+    if (!plainEmbed && window.Vimeo && Vimeo.Player) {
+      try {
+        player = new Vimeo.Player(document.getElementById('rickvid'), { id: VIMEO_ID, ...VIMEO_OPTS });
+        player.ready().then(() => { playerReady = true; if (rolling) playFromStart(); },
+          () => { usePlainEmbed(); if (rolling) startRoll(); });
+        player.on('error', () => { if (!playerReady) { usePlainEmbed(); if (rolling) startRoll(); } });
+      } catch (e) { usePlainEmbed(); return startRoll(); }
       // the player never got ready (blocked or broken): fall back to the plain embed
-      setTimeout(() => { if (!playerReady && player) { usePlainEmbed(); if (rolling) startRoll(); } }, 4000);
+      setTimeout(() => { if (!playerReady && player) { usePlainEmbed(); if (rolling) startRoll(); } }, 5000);
       return;
     }
     if (!plainEmbed) usePlainEmbed();
-    plainEmbed.src = `https://www.youtube.com/embed/${VIDEO_ID}?autoplay=1&controls=0&loop=1&playlist=${VIDEO_ID}&playsinline=1&rel=0`;
+    plainEmbed.src = `https://player.vimeo.com/video/${VIMEO_ID}?autoplay=1&loop=1&muted=0&controls=0&title=0&byline=0&portrait=0&playsinline=1&dnt=1`;
   }
 
   function stopRoll() {
     if (!rolling) return;
-    rolling = false; document.body.classList.remove('rolling');
+    rolling = false; needSound = false; document.body.classList.remove('rolling');
     try {
-      if (player && playerReady) player.pauseVideo();
+      if (player && playerReady) player.pause().catch(() => {});
       if (plainEmbed) plainEmbed.src = 'about:blank';
     } catch (e) {}
   }
