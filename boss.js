@@ -16,6 +16,15 @@
   // Hand slam timelines (seconds): reach out, wind up, SLAM, hold, then pull back.
   const PLAYER_TL = { reach: 0.14, wind: 0.28, slam: 0.34, hold: 0.45, end: 0.58 };
   const RICK_TL = { reach: 0.3, wind: 1.05, slam: 1.15, hold: 1.55, end: 1.9 };
+  // The entrance: "An evil Rick appeared!" types out, then the LEVEL 2 card shows.
+  const APPEAR_TEXT = 'An evil Rick appeared!', TYPE_START = 0.25, TYPE_SPEED = 26; // characters per second
+  const CARD_AT = 1.3, INTRO_TIME = 3.7;
+  const typed = () => Math.max(0, Math.min(APPEAR_TEXT.length, Math.floor((phaseT - TYPE_START) * TYPE_SPEED)));
+  let lastTyped = 0;
+  function introBlips() { // a little blip per letter, like an old RPG text box
+    const n = typed();
+    if (n > lastTyped) { if (n % 2 === 0 || n === APPEAR_TEXT.length) sfx('blip'); lastTyped = n; }
+  }
 
   // Rick's head, centred on the face and looking right. Shared with the maze level (maze.js).
   // mood: 'normal' | 'hurt' | 'dizzy'
@@ -29,10 +38,16 @@
     c.fill(); c.stroke();
     c.fillStyle = '#1b1b22';
     if (mood === 'dizzy') { c.font = '700 12px system-ui'; c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillText('x', 8, 1); }
+    else if (mood === 'evil') { c.save(); c.shadowColor = '#ff2a1a'; c.shadowBlur = 10; c.fillStyle = '#ff2a1a'; c.beginPath(); c.arc(8, -2, 3, 0, 7); c.fill(); c.restore(); }
     else { c.beginPath(); c.arc(8, -2, 2.4, 0, 7); c.fill(); }
-    c.strokeStyle = '#7a3a17'; c.lineWidth = 2; c.beginPath(); c.moveTo(3, -9); c.lineTo(12, -10); c.stroke();
+    c.strokeStyle = '#7a3a17'; c.lineWidth = 2; c.beginPath();
+    if (mood === 'evil') { c.moveTo(2, -11); c.lineTo(13, -6); } else { c.moveTo(3, -9); c.lineTo(12, -10); } // angry brow
+    c.stroke();
     c.strokeStyle = '#9b4a3a';
-    c.beginPath(); if (mood !== 'normal') c.arc(7, 15, 4, Math.PI * 1.1, Math.PI * 1.9); else c.arc(6, 8, 6, 0.2, 1.3); c.stroke();
+    c.beginPath();
+    if (mood === 'evil') { c.moveTo(1, 9); c.quadraticCurveTo(7, 14, 13, 7); } // a wicked grin
+    else if (mood !== 'normal') c.arc(7, 15, 4, Math.PI * 1.1, Math.PI * 1.9); else c.arc(6, 8, 6, 0.2, 1.3);
+    c.stroke();
   }
   window.RickHead = drawRickHead;
 
@@ -92,7 +107,8 @@
     bonuses = []; rockets = []; fx = []; texts = []; rickSlam = null;
     phase = 'intro'; phaseT = 0; bonusTimer = 3;
     rhead = null; minis = null; handedOff = false;
-    sfx('sting'); setTimeout(startBeat, 1800);
+    lastTyped = 0;
+    setTimeout(() => sfx('sting'), 1300); setTimeout(() => { if (!ended && phase !== 'lose') startBeat(); }, 3100);
     last = performance.now();
     raf = requestAnimationFrame(frame);
   }
@@ -421,7 +437,8 @@
   function frame(now) {
     const dt = Math.min(0.033, (now - last) / 1000); last = now;
     phaseT += dt;
-    if (phase === 'intro' && phaseT > 2.4) { phase = 'fight'; phaseT = 0; }
+    if (phase === 'intro') introBlips();
+    if (phase === 'intro' && phaseT > INTRO_TIME) { phase = 'fight'; phaseT = 0; }
     if (phase === 'lose' && phaseT > 2) finish(); // no key needed: straight back to the snake
     if (phase === 'decap') { updatePlayer(dt); updateDecap(dt); }
     else if (phase === 'fight' || phase === 'win' || phase === 'lose') {
@@ -452,6 +469,12 @@
     for (const b of bonuses) drawBonus(b);
     if (rickSlam) drawMarker(rickSlam.tx, rickSlam.ty, 125, rickSlam.t, RICK_TL, '255,70,60');
     if (P.slam) drawMarker(P.slam.tx, P.slam.ty, P.slam.mega ? 115 : 72, P.slam.t, PLAYER_TL, '120,255,140');
+    if (phase === 'intro') { // an evil red glow behind Rick as he appears
+      const k = clamp01(phaseT / 0.5) * (1 - clamp01((phaseT - INTRO_TIME + 0.6) / 0.6)) * (0.8 + 0.2 * Math.sin(phaseT * 9));
+      const g = ctx.createRadialGradient(R.x, R.y - 110, 10, R.x, R.y - 110, 170);
+      g.addColorStop(0, `rgba(255,30,20,${0.55 * k})`); g.addColorStop(1, 'rgba(255,30,20,0)');
+      ctx.fillStyle = g; ctx.fillRect(R.x - 180, R.y - 290, 360, 320);
+    }
     drawRick();
     if (rhead) { ctx.save(); ctx.translate(rhead.x, rhead.y); ctx.rotate(rhead.rot); ctx.scale(R.face, 1); drawRickHead(ctx, 'hurt'); ctx.restore(); }
     if (minis) for (const m of minis) { ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.rot); ctx.scale(0.45, 0.45); drawRickHead(ctx, 'normal'); ctx.restore(); }
@@ -706,7 +729,7 @@
     if (!R.headless) {
       ctx.fillStyle = '#f2c7a0'; ctx.fillRect(-5, -160, 10, 10);
       ctx.save(); ctx.translate(3, -175);
-      drawRickHead(ctx, R.st === 'dizzy' || R.st === 'down' ? 'dizzy' : R.hurtT > 0 || R.st === 'decap' ? 'hurt' : 'normal');
+      drawRickHead(ctx, R.st === 'dizzy' || R.st === 'down' ? 'dizzy' : R.hurtT > 0 || R.st === 'decap' ? 'hurt' : phase === 'intro' ? 'evil' : 'normal');
       ctx.restore();
     } else { // a tidy collar where the head used to be
       ctx.fillStyle = '#f4f4f4'; ctx.beginPath(); ctx.ellipse(0, -153, 11, 4, 0, 0, 7); ctx.fill();
@@ -803,8 +826,28 @@
 
     // intro / end cards
     if (phase === 'intro') {
-      const k = clamp01(phaseT / 0.4);
-      ctx.fillStyle = `rgba(7,4,13,${0.55 * (1 - clamp01((phaseT - 1.9) / 0.5))})`; ctx.fillRect(0, 0, W, H);
+      // the RPG text box: "An evil Rick appeared!"
+      const out = 1 - clamp01((phaseT - (INTRO_TIME - 0.35)) / 0.35);
+      ctx.save(); ctx.globalAlpha = clamp01(phaseT / 0.2) * out;
+      const bw = 560, bh = 76, bx = (W - bw) / 2, by = H - 128;
+      ctx.fillStyle = 'rgba(12,8,24,.92)'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 12); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(bx + 7, by + 7, bw - 14, bh - 14, 8); ctx.stroke();
+      ctx.font = '800 30px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const shown = APPEAR_TEXT.slice(0, typed()), split = shown.indexOf('evil');
+      // "evil" in red, the rest in white
+      let x = bx + 28;
+      const parts = split < 0 ? [[shown, '#fff']] : [[shown.slice(0, split), '#fff'], [shown.slice(split, split + 4), '#ff3b30'], [shown.slice(split + 4), '#fff']];
+      for (const [t, c] of parts) { ctx.fillStyle = c; ctx.fillText(t, x, by + bh / 2 + 1); x += ctx.measureText(t).width; }
+      if (typed() === APPEAR_TEXT.length && Math.floor(phaseT * 3) % 2) { // blinking "next" arrow
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(bx + bw - 34, by + bh - 26); ctx.lineTo(bx + bw - 20, by + bh - 26); ctx.lineTo(bx + bw - 27, by + bh - 18); ctx.fill();
+      }
+      ctx.restore();
+    }
+    if (phase === 'intro' && phaseT > CARD_AT) {
+      const ct = phaseT - CARD_AT, k = clamp01(ct / 0.4);
+      ctx.fillStyle = `rgba(7,4,13,${0.55 * (1 - clamp01((ct - 1.9) / 0.5))})`; ctx.fillRect(0, 0, W, H - 140);
       ctx.save(); ctx.translate(W / 2, H * 0.36); ctx.scale(k, k);
       ctx.textAlign = 'center'; ctx.fillStyle = '#ffd23f'; ctx.font = '900 30px system-ui, sans-serif';
       ctx.fillText('LEVEL 2', 0, -64);
