@@ -668,9 +668,8 @@
     ctx.beginPath(); for (const y of [-0.08, 0.06]) { ctx.moveTo(-0.79, y); ctx.lineTo(-0.55, y); } ctx.stroke();
     ctx.beginPath(); for (const y of [-0.12, 0.0, 0.12]) { ctx.moveTo(-0.44, y); ctx.lineTo(-0.28, y); } ctx.stroke(); // stitching
   }
-  // The teasing hand: pokes the button three times, then wags its finger ("go on…"), with taunts in a
-  // speech bubble. It gets faster and shakier the longer you resist, and never presses it itself.
-  const TAUNTS = ['Press it!', 'Go on…', 'Just once!', "Nobody's watching…", 'You know you want to', 'Pleeeease?', 'PRESS IT!'];
+  // The teasing hand: pokes the button three times, then wags its finger ("go on…").
+  // It gets faster and shakier the longer you resist, and never presses it itself.
   function drawCoaxingHand(cx, cy, R) {
     const t = phase === 'button' ? button.t : BUTTON_WAIT + 1.2;
     if (t < 0.7) return;
@@ -702,22 +701,6 @@
     ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 12;
     drawGlove();
     ctx.restore();
-    // the taunt bubble, above the glove
-    if (phase === 'button' && appear > 0.9) {
-      const text = TAUNTS[Math.floor(tap / 4) % TAUNTS.length];
-      ctx.save();
-      ctx.font = '800 22px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const w = ctx.measureText(text).width + 30, h = 42;
-      const bx = Math.min(W - w / 2 - 10, hx + dx * S * 0.9), by = Math.max(h / 2 + 8, hy + dy * S * 0.9 - S * 0.62);
-      const pop = 1 + Math.max(0, 0.15 - (tap % 4) * 0.5) ; // a little pop when the taunt changes
-      ctx.translate(bx, by); ctx.scale(pop, pop);
-      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#1b1b22'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, 14); ctx.fill(); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(-14, h / 2 - 1); ctx.lineTo(-4, h / 2 + 14); ctx.lineTo(4, h / 2 - 1); ctx.closePath(); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(-14, h / 2); ctx.lineTo(-4, h / 2 + 14); ctx.lineTo(4, h / 2); ctx.stroke();
-      ctx.fillStyle = '#d7261e'; ctx.fillText(text, 0, 1);
-      ctx.restore();
-    }
   }
 
 
