@@ -30,6 +30,8 @@
   const HEAD_SPEED = 3.6, HEAD_SPEED_MAX = 5.4; // heads speed up as fewer are left
   const LIVES = 3, HEAD_COUNT = 3;
   const BANANAS_MAX = 10, PEELS_MAX = 16;
+  const POCKET_MAX = 9;                // bananas you can carry to throw
+  const THROW_SPEED = 13, THROW_COOLDOWN = 0.25;
   const BUTTON_WAIT = 12;              // seconds of leaving the final button alone to truly win
 
   const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up, right, down, left
@@ -41,6 +43,7 @@
 
   let root, cv, ctx, raf, last, done, ended, beatAt;
   let T, ox, oy;                       // tile size and maze offset on screen
+  let thrown = []; // bananas flying through the corridors
   let P, heads, bananas, peels, fx, texts, phase, phaseT, bananaTimer, toSpawn, spawnTimer, dist, shake, flash, button, tempt;
 
   // ---- Sound (sfx.js) ----
@@ -60,13 +63,17 @@
         .maze .pad button { border-radius: 12px; border: 2px solid rgba(255,255,255,.3); background: rgba(255,255,255,.12); color: #fff; font: 700 20px system-ui, sans-serif; }
         .maze .pad [data-d="0"] { grid-column: 2; grid-row: 1; } .maze .pad [data-d="3"] { grid-column: 1; grid-row: 2; }
         .maze .pad [data-d="2"] { grid-column: 2; grid-row: 2; } .maze .pad [data-d="1"] { grid-column: 3; grid-row: 2; }
-        @media (pointer: coarse) { .maze .pad { display: grid; } }
+        .maze .throw { position: absolute; left: 14px; bottom: 14px; display: none; width: 84px; height: 84px; border-radius: 50%;
+          border: 2px solid rgba(255,225,77,.6); background: rgba(255,225,77,.25); color: #fff; font: 800 15px system-ui, sans-serif; }
+        @media (pointer: coarse) { .maze .pad { display: grid; } .maze .throw { display: block; } }
       </style>
       <canvas></canvas>
+      <button class="throw">THROW</button>
       <div class="pad"><button data-d="0">▲</button><button data-d="3">◀</button><button data-d="2">▼</button><button data-d="1">▶</button></div>`;
     document.body.appendChild(root);
     cv = root.querySelector('canvas'); ctx = cv.getContext('2d');
     for (const b of root.querySelectorAll('.pad button')) b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); anyInput(); input(+b.dataset.d); });
+    root.querySelector('.throw').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); anyInput(); throwBanana(); });
     // swipes on the maze steer too; any tap counts as pressing the final button
     let sw = null;
     cv.addEventListener('pointerdown', e => { sw = { x: e.clientX, y: e.clientY }; anyInput(); });
@@ -80,7 +87,8 @@
     resize();
 
     const s = find('P')[0];
-    P = { x: s.x, y: s.y, dir: 3, want: 3, moving: false, prog: 0, hp: LIVES, inv: 0, peels: 0, trail: [], t: 0 };
+    P = { x: s.x, y: s.y, dir: 3, want: 3, moving: false, prog: 0, hp: LIVES, inv: 0, peels: 0, ammo: 2, cd: 0, trail: [], t: 0 };
+    thrown = [];
     heads = []; bananas = []; peels = []; fx = []; texts = [];
     toSpawn = HEAD_COUNT; spawnTimer = 1.2; bananaTimer = 0; shake = 0; flash = 0; button = null; tempt = 0;
     phase = 'intro'; phaseT = 0; beatAt = 0;
@@ -126,12 +134,14 @@
   function onKey(e) {
     e.stopImmediatePropagation(); // the snake game underneath must not react
     const k = e.key.toLowerCase();
-    if (k in KEYMAP || k === ' ') e.preventDefault();
+    if (k in KEYMAP || k in THROW_KEYS) e.preventDefault();
     if (e.repeat) return;        // a key still held from the maze is not a press
     if (k === 'm') return SFX.toggleMute(); // muting is not pressing the button
     anyInput();
     if (k in KEYMAP) input(KEYMAP[k]);
+    else if (k in THROW_KEYS) throwBanana();
   }
+  const THROW_KEYS = { ' ': 1, j: 1, k: 1, f: 1, enter: 1 };
   function input(d) { if (phase === 'play' || phase === 'intro') P.want = d; }
   function anyInput() {
     if (phase === 'button' && button.t > 1.2) pressButton();
@@ -157,6 +167,7 @@
 
   function updatePlayer(dt) {
     P.t += dt;
+    if (P.cd > 0) P.cd -= dt;
     if (P.inv > 0) P.inv -= dt;
     // turn around at any time
     if (P.moving && P.want === (P.dir + 2) % 4) {
@@ -182,6 +193,7 @@
     if (b) {
       bananas = bananas.filter(o => o !== b);
       P.peels++;
+      P.ammo = Math.min(POCKET_MAX, P.ammo + 1);
       sfx('nom');
       popText(P.x + 0.5, P.y, 'NOM', '#ffe14d');
     }
@@ -191,6 +203,47 @@
       P.peels--;
       sfx('splat');
     }
+  }
+
+  // ---- Throwing bananas ----
+  function throwBanana() {
+    if (phase !== 'play' || P.ammo <= 0 || P.cd > 0) { if (phase === 'play' && P.ammo <= 0) sfx('clunk'); return; }
+    P.ammo--; P.cd = THROW_COOLDOWN;
+    const p = pos(P);
+    thrown.push({ x: p.x, y: p.y, dir: P.dir, rot: 0 });
+    sfx('swoosh');
+  }
+
+  function updateThrown(dt) {
+    for (const b of thrown) {
+      const [dx, dy] = DIRS[b.dir];
+      b.x += dx * THROW_SPEED * dt; b.y += dy * THROW_SPEED * dt; b.rot += dt * 20;
+      // hit a head?
+      const h = heads.find(h => !h.dead && Math.hypot(pos(h).x - b.x, pos(h).y - b.y) < 0.7);
+      if (h) {
+        b.done = true;
+        damageHead(h, 'BONK!');
+        continue;
+      }
+      // reached a wall: it splats and leaves a peel on the last open tile
+      const cx = Math.round(b.x), cy = Math.round(b.y);
+      if (wall(cx + dx, cy + dy) && (b.x - cx) * dx + (b.y - cy) * dy >= 0) {
+        b.done = true;
+        if (!peels.some(p => p.x === cx && p.y === cy) && peels.length < PEELS_MAX && !wall(cx, cy)) peels.push({ x: cx, y: cy, rot: Math.random() * 6, t: 0 });
+        burst(cx + 0.5, cy + 0.5, 8, ['#ffe14d', '#fff3b0'], 4);
+        sfx('splat');
+      }
+    }
+    thrown = thrown.filter(b => !b.done);
+  }
+
+  // A head takes 1 damage, spins dizzy for a moment, and pops when it runs out.
+  function damageHead(h, label) {
+    h.hp--; h.stun = 1.1; h.hurt = 0.4;
+    sfx(label === 'SLIP!' ? 'slip' : 'hit'); setTimeout(() => sfx(h.hp > 0 ? 'oof' : 'bigPop'), label === 'SLIP!' ? 350 : 120);
+    burst(h.x + 0.5, h.y + 0.5, 10, ['#ffe14d', '#fff'], 5);
+    popText(h.x + 0.5, h.y, h.hp > 0 ? label : 'POP!', h.hp > 0 ? '#ffe14d' : '#fff');
+    if (h.hp <= 0) { h.dead = true; shake = Math.max(shake, 6); burst(h.x + 0.5, h.y + 0.5, 30, ['#d9692b', '#f2c7a0', '#fff', '#ffe14d'], 7); }
   }
 
   function spawnBanana() {
@@ -224,11 +277,8 @@
         const peel = peels.find(p => p.x === h.x && p.y === h.y);
         if (peel) {
           peels = peels.filter(p => p !== peel);
-          h.hp--; h.stun = 1.1; h.hurt = 0.4; h.prog = 0;
-          sfx('slip'); setTimeout(() => sfx(h.hp > 0 ? 'oof' : 'bigPop'), 350);
-          burst(h.x + 0.5, h.y + 0.5, 10, ['#ffe14d', '#fff'], 5);
-          popText(h.x + 0.5, h.y, h.hp > 0 ? 'SLIP!' : 'POP!', h.hp > 0 ? '#ffe14d' : '#fff');
-          if (h.hp <= 0) { h.dead = true; shake = Math.max(shake, 6); burst(h.x + 0.5, h.y + 0.5, 30, ['#d9692b', '#f2c7a0', '#fff', '#ffe14d'], 7); }
+          h.prog = 0;
+          damageHead(h, 'SLIP!');
           break;
         }
         // pick the next direction: mostly toward the player, never straight back unless it's a dead end
@@ -277,7 +327,7 @@
     if (phase === 'intro' || phase === 'play') {
       if (phase === 'play') updatePlayer(dt);
       if (phase === 'play' && toSpawn > 0 && (spawnTimer -= dt) <= 0) { spawnHead(); toSpawn--; spawnTimer = 1.0; }
-      if (phase === 'play') updateHeads(dt);
+      if (phase === 'play') { updateHeads(dt); updateThrown(dt); }
       if ((bananaTimer -= dt) <= 0) { if (bananas.length < BANANAS_MAX) spawnBanana(); bananaTimer = 0.9; }
       if (phase === 'play' && toSpawn === 0 && heads.length === 0) { phase = 'cleared'; phaseT = 0; SFX.music(null); sfx('fanfare'); }
     }
@@ -316,6 +366,7 @@
     for (const b of bananas) drawBanana(sx(b.x), sy(b.y) + Math.sin(b.t * 4) * T * 0.05);
     for (const h of heads) drawHead(h);
     drawSnake();
+    for (const b of thrown) { ctx.save(); ctx.translate(sx(b.x), sy(b.y)); ctx.rotate(b.rot); drawBanana(0, 0); ctx.restore(); }
     for (const f of fx) { ctx.globalAlpha = clamp01(f.life / f.max * 1.5); ctx.fillStyle = f.c; ctx.fillRect(sx(f.x - 0.5) - 3, sy(f.y - 0.5) - 3, 6, 6); }
     ctx.globalAlpha = 1;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -328,7 +379,7 @@
     ctx.restore();
     if (flash > 0) { ctx.fillStyle = `rgba(255,60,50,${flash})`; ctx.fillRect(0, 0, W, H); }
     drawHUD();
-    if (phase === 'intro') drawCard('THE FINAL FINAL BOSS', 'Eat bananas. Drop peels. Make the heads slip.', '#ff3b30', clamp01(phaseT / 0.3) * clamp01((2.6 - phaseT) / 0.4));
+    if (phase === 'intro') drawCard('THE FINAL FINAL BOSS', 'Eat bananas, drop peels, throw bananas with SPACE.', '#ff3b30', clamp01(phaseT / 0.3) * clamp01((2.6 - phaseT) / 0.4), 'LEVEL 3');
     if (phase === 'cleared') drawCard('ALL HEADS DOWN!', 'You did it. Time for your reward...', '#5ee07a', clamp01(phaseT / 0.3));
     if (phase === 'lose') drawCard('ROLLED OVER', 'The heads got you. Back to the snake.', '#ff3b30', clamp01(phaseT / 0.3));
     if (phase === 'button' || phase === 'pressed' || phase === 'victory') drawFinale();
@@ -410,7 +461,7 @@
     ctx.fillStyle = '#a6f5b5'; ctx.beginPath(); ctx.arc(x, y, T * 0.4, 0, 7); ctx.fill();
     ctx.fillStyle = '#14161b';
     for (const sgn of [-1, 1]) { ctx.beginPath(); ctx.arc(x + dx * T * 0.15 - dy * sgn * T * 0.17, y + dy * T * 0.15 + dx * sgn * T * 0.17, T * 0.07, 0, 7); ctx.fill(); }
-    if (P.peels > 0) { ctx.fillStyle = '#ffe14d'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('×' + P.peels, x, y - T * 0.6); }
+    if (P.ammo > 0) { ctx.fillStyle = '#ffe14d'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('×' + P.ammo, x, y - T * 0.6); }
   }
 
   function heart(x, y, s, full) {
@@ -425,15 +476,16 @@
     ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
     ctx.fillText(`HEADS LEFT: ${heads.length + toSpawn}`, W / 2, 26);
     ctx.textAlign = 'right'; ctx.fillStyle = '#ffe14d';
-    ctx.fillText(`PEELS READY: ${P.peels}`, W - 20, 26);
+    ctx.fillText(`BANANAS TO THROW: ${P.ammo}`, W - 20, 26);
     ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('W A S D to move · every banana you eat drops a peel behind you · M mute', W / 2, H - 8);
+    ctx.fillText('W A S D move · SPACE throws a banana · every banana you eat also drops a peel behind you · M mute', W / 2, H - 8);
   }
 
-  function drawCard(title, sub, color, a) {
+  function drawCard(title, sub, color, a, kicker) {
     ctx.save(); ctx.globalAlpha = a;
-    ctx.fillStyle = 'rgba(7,4,13,.6)'; ctx.fillRect(0, H * 0.3, W, 130);
+    ctx.fillStyle = 'rgba(7,4,13,.6)'; ctx.fillRect(0, H * 0.3 - (kicker ? 40 : 0), W, 130 + (kicker ? 40 : 0));
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (kicker) { ctx.font = '900 28px system-ui, sans-serif'; ctx.fillStyle = '#ffd23f'; ctx.fillText(kicker, W / 2, H * 0.3 - 6); }
     ctx.font = '900 54px system-ui, sans-serif'; ctx.fillStyle = color; ctx.fillText(title, W / 2, H * 0.3 + 52);
     ctx.font = '700 20px system-ui, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(sub, W / 2, H * 0.3 + 100);
     ctx.restore();
@@ -473,6 +525,12 @@
     ctx.restore();
 
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (phase === 'button' && t < 3.4) { // the last level
+      ctx.save(); ctx.globalAlpha = clamp01(t / 0.3) * clamp01((3.4 - t) / 0.5);
+      ctx.font = '900 30px system-ui, sans-serif'; ctx.fillStyle = '#ffd23f'; ctx.fillText('LEVEL 4', W / 2, 30);
+      ctx.font = '800 20px system-ui, sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText('THE REWARD', W / 2, 60);
+      ctx.restore();
+    }
     if (phase === 'button' && t > 1.2) {
       const lines = ['Your reward. PRESS IT.', 'You earned it.', 'Go on...', "It's totally safe.", 'Just one little press.', 'Why are you waiting?', 'PRESS. THE. BUTTON.'];
       ctx.font = '800 24px system-ui, sans-serif'; ctx.fillStyle = '#fff';
