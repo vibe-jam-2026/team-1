@@ -34,6 +34,7 @@
   const THROW_SPEED = 13, THROW_COOLDOWN = 0.25;
   const VOICE_STUN = 2.5;              // saying "banana" stuns every head in place for this long
   const BUTTON_WAIT = 12;              // seconds of leaving the final button alone to truly win
+  const VICTORY_POINTS = 500;          // the bonus for not pressing it (added to the snake score)
 
   const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up, right, down, left
   const clamp01 = t => Math.max(0, Math.min(1, t));
@@ -425,7 +426,7 @@
         const before = button.tap || 0; button.tap = before + dt / period;
         if (Math.floor(button.tap + 0.25) > Math.floor(before + 0.25) && Math.floor(button.tap + 0.25) % 4 !== 0) sfx('click'); // finger reaches the button
       }
-      if (button.t > BUTTON_WAIT + 1.2) { phase = 'victory'; phaseT = 0; sfx('fanfare'); setTimeout(() => sfx('sparkle'), 500); setTimeout(() => sfx('newBest'), 900); }
+      if (button.t > BUTTON_WAIT + 1.2) { phase = 'victory'; phaseT = 0; sfx('fanfare'); for (let i = 0; i < 8; i++) setTimeout(() => sfx('coin'), 400 + i * 120); setTimeout(() => sfx('sparkle'), 500); setTimeout(() => sfx('newBest'), 900); }
     }
     if (phase === 'pressed' && phaseT > 3.2) finish('pressed');
     if (phase === 'lose' && phaseT > 2) finish('lose');
@@ -751,12 +752,20 @@
       }
     }
     if (phase === 'victory') {
-      ctx.font = '900 60px system-ui, sans-serif'; ctx.fillStyle = '#5ee07a'; ctx.fillText('TRUE VICTORY', W / 2, H * 0.36);
+      ctx.font = '900 60px system-ui, sans-serif'; ctx.fillStyle = '#5ee07a'; ctx.fillText('TRUE VICTORY', W / 2, H * 0.3);
       ctx.font = '700 22px system-ui, sans-serif'; ctx.fillStyle = '#fff';
-      ctx.fillText("You didn't press it. Nobody ever doesn't press it.", W / 2, H * 0.36 + 50);
-      if (phaseT > 1.5) { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '16px system-ui, sans-serif'; ctx.fillText('Press any key to go back to the snake (+100 points)', W / 2, H * 0.36 + 90); }
+      ctx.fillText("You didn't press it. Nobody ever doesn't press it.", W / 2, H * 0.3 + 50);
+      // the bonus counts up, then pops
+      const k = clamp01((phaseT - 0.4) / 1.0), shown = Math.round(ease(k) * VICTORY_POINTS);
+      const pop = 1 + Math.max(0, 0.25 - Math.abs(phaseT - 1.45) * 0.8);
+      ctx.save(); ctx.translate(W / 2, H * 0.3 + 130); ctx.scale(pop, pop);
+      ctx.font = '900 76px system-ui, sans-serif'; ctx.lineWidth = 8; ctx.strokeStyle = '#3a2a00';
+      ctx.strokeText(`+${shown}`, 0, 0); ctx.fillStyle = '#ffd23f'; ctx.fillText(`+${shown}`, 0, 0);
+      ctx.font = '800 20px system-ui, sans-serif'; ctx.fillStyle = '#ffd23f'; ctx.fillText('BONUS POINTS', 0, 52);
+      ctx.restore();
+      if (phaseT > 1.6) { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.font = '16px system-ui, sans-serif'; ctx.fillText('Press any key to go back to the snake with your bonus', W / 2, H * 0.3 + 230); }
     }
   }
 
-  window.MazeFight = { start };
+  window.MazeFight = { start, VICTORY_POINTS };
 })();
