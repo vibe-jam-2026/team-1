@@ -131,9 +131,9 @@
   </div>
 </div>
 <!-- ?v=N makes browsers fetch new versions of these files after an update: bump it when they change -->
-<script src="sfx.js?v=22"></script>
-<script src="boss.js?v=22"></script>
-<script src="maze.js?v=22"></script>
+<script src="sfx.js?v=23"></script>
+<script src="boss.js?v=23"></script>
+<script src="maze.js?v=23"></script>
 <script>
 (() => {
   // ---- Tunables (we will iterate on these) ----
@@ -162,7 +162,8 @@
   // Arm timeline (seconds into the 'arm' state): reach out, wind up high, SLAM, then let the impact ring out.
   const T_REACH = 0.45, T_WIND = 0.75, T_SLAM = 0.83, ARM_TIME = 1.5;
   const RICK_TIME = 0.6;       // short pause while the video starts, then play resumes on top of it
-  const BOSS_WIN_POINTS = 100; // for beating both bosses (and not pressing the final button)
+  // for beating both bosses and not pressing the final button (the amount lives in maze.js)
+  const BOSS_WIN_POINTS = (window.MazeFight && MazeFight.VICTORY_POINTS) || 500;
   const HIT_PAUSE = 1.2;       // freeze after a hit
   // Power-ups: bomb, shield, scissors. Some of them are traps.
   const PU_EVERY = () => 5 + Math.random() * 5; // seconds until the next power-up
