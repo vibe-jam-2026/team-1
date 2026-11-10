@@ -46,6 +46,8 @@
   let T, ox, oy;                       // tile size and maze offset on screen
   let thrown = []; // bananas flying through the corridors
   let waves = [];  // shockwaves from shouting "banana"
+  let zaps = [];   // lightning bolts from the snake to each stunned head
+  let voiceStunT = 0, shoutT = 0; // stun time left for heads that appear meanwhile; the big BANANA! title
   let P, heads, bananas, peels, fx, texts, phase, phaseT, bananaTimer, toSpawn, spawnTimer, dist, shake, flash, button, tempt;
 
   // ---- Sound (sfx.js) ----
@@ -90,7 +92,7 @@
 
     const s = find('P')[0];
     P = { x: s.x, y: s.y, dir: 3, want: 3, moving: false, prog: 0, hp: LIVES, inv: 0, peels: 0, ammo: 2, cd: 0, trail: [], t: 0 };
-    thrown = []; waves = [];
+    thrown = []; waves = []; zaps = []; voiceStunT = 0; shoutT = 0;
     heads = []; bananas = []; peels = []; fx = []; texts = [];
     toSpawn = HEAD_COUNT; spawnTimer = 1.2; bananaTimer = 0; shake = 0; flash = 0; button = null; tempt = 0;
     phase = 'intro'; phaseT = 0; beatAt = 0;
@@ -266,22 +268,25 @@
     if (phase !== 'play') { voiceQueue = 0; return; }
     if (voiceQueue > 0 && P.cd <= 0 && throwBanana(true)) {
       voiceQueue--;
-      const p = pos(P);
-      popText(p.x + 0.5, p.y - 0.3, 'BANANA!', '#ffe14d');
-      stunAllHeads(p);
+      stunAllHeads(pos(P)); // the big BANANA! title says it all
     }
   }
 
   // The power of the word: every head freezes in place, dizzy, for VOICE_STUN seconds.
+  // Unlimited range: every head in the maze, however far away, and any head that rolls out meanwhile.
   function stunAllHeads(from) {
     waves.push({ x: from.x, y: from.y, t: 0 });
+    voiceStunT = VOICE_STUN; shoutT = 0.9;
     for (const h of heads) {
-      h.stun = Math.max(h.stun, VOICE_STUN);
-      const q = pos(h); burst(q.x + 0.5, q.y + 0.5, 8, ['#ffe14d', '#fff'], 4);
+      stunHead(h, VOICE_STUN);
+      const q = pos(h);
+      zaps.push({ x0: from.x, y0: from.y, h, t: 0, seed: Math.random() * 100 });
+      setTimeout(() => burst(q.x + 0.5, q.y + 0.5, 14, ['#ffe14d', '#fff', '#fff3b0'], 6), 120);
     }
-    sfx('boing'); setTimeout(() => sfx('tweet'), 250);
-    shake = Math.max(shake, 5);
+    sfx('boing'); sfx('shieldUp'); setTimeout(() => sfx('tweet'), 300);
+    shake = Math.max(shake, 8);
   }
+  function stunHead(h, t) { h.stun = Math.max(h.stun, t); h.stunMax = h.stun; h.zapped = true; } // the countdown ring refills
 
   function updateThrown(dt) {
     for (const b of thrown) {
@@ -308,7 +313,8 @@
 
   // A head takes 1 damage, spins dizzy for a moment, and pops when it runs out.
   function damageHead(h, label) {
-    h.hp--; h.stun = Math.max(h.stun, 1.1); h.hurt = 0.4;
+    h.hp--; h.hurt = 0.4;
+    if (h.stun < 1.1) { h.stun = 1.1; h.stunMax = 1.1; h.zapped = false; }
     sfx(label === 'SLIP!' ? 'slip' : 'hit'); setTimeout(() => sfx(h.hp > 0 ? 'oof' : 'bigPop'), label === 'SLIP!' ? 350 : 120);
     burst(h.x + 0.5, h.y + 0.5, 10, ['#ffe14d', '#fff'], 5);
     popText(h.x + 0.5, h.y, h.hp > 0 ? label : 'POP!', h.hp > 0 ? '#ffe14d' : '#fff');
@@ -330,6 +336,7 @@
     heads.push({ x: pen.x, y: pen.y, dir: pick([1, 3]), prog: 0, hp: 2 + (Math.random() < 0.5 ? 1 : 0), stun: 0, rot: 0, hurt: 0,
       chase: heads.length % 3 === 2 ? 0.45 : 0.85, say: 0 });
     heads[heads.length - 1].max = heads[heads.length - 1].hp;
+    if (voiceStunT > 0) stunHead(heads[heads.length - 1], voiceStunT); // rolled out into a stun: frozen too
     sfx('pop'); sfx('roll');
   }
 
@@ -399,7 +406,11 @@
       if (phase === 'play') { updateHeads(dt); updateThrown(dt); }
       updateVoice();
       for (const w of waves) w.t += dt;
-      waves = waves.filter(w => w.t < 0.9);
+      waves = waves.filter(w => w.t < 1.1);
+      for (const z of zaps) z.t += dt;
+      zaps = zaps.filter(z => z.t < 0.45 && !z.h.dead);
+      if (voiceStunT > 0) voiceStunT -= dt;
+      if (shoutT > 0) shoutT -= dt;
       if ((bananaTimer -= dt) <= 0) { if (bananas.length < BANANAS_MAX) spawnBanana(); bananaTimer = 0.9; }
       if (phase === 'play' && toSpawn === 0 && heads.length === 0) { phase = 'cleared'; phaseT = 0; SFX.music(null); sfx('fanfare'); }
     }
@@ -450,11 +461,30 @@
     ctx.globalAlpha = 1;
     ctx.restore();
     if (flash > 0) { ctx.fillStyle = `rgba(255,60,50,${flash})`; ctx.fillRect(0, 0, W, H); }
-    for (const w of waves) { // the shout ripples out across the whole maze
-      const k = w.t / 0.9;
-      ctx.strokeStyle = `rgba(255,225,77,${1 - k})`; ctx.lineWidth = 10 * (1 - k) + 2;
-      ctx.beginPath(); ctx.arc(sx(w.x), sy(w.y), 20 + k * W * 0.8, 0, 7); ctx.stroke();
-      if (w.t < 0.15) { ctx.fillStyle = `rgba(255,225,77,${0.25 * (1 - w.t / 0.15)})`; ctx.fillRect(0, 0, W, H); }
+    for (const w of waves) { // the shout ripples out past every corner of the maze
+      const cx = sx(w.x), cy = sy(w.y);
+      const far = Math.max(...[[ox, oy], [ox + COLS * T, oy], [ox, oy + ROWS * T], [ox + COLS * T, oy + ROWS * T]].map(([x, y]) => Math.hypot(x - cx, y - cy))) + 40;
+      for (const [delay, width] of [[0, 18], [0.18, 8]]) {
+        const k = Math.max(0, Math.min(1, (w.t - delay) / 0.75));
+        if (k <= 0 || k >= 1) continue;
+        const r = 20 + ease(k) * far;
+        ctx.save(); ctx.shadowColor = '#ffe14d'; ctx.shadowBlur = 20;
+        ctx.strokeStyle = `rgba(255,225,77,${(1 - k) * 0.95})`; ctx.lineWidth = width * (1 - k) + 2;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke(); ctx.restore();
+      }
+      if (w.t < 0.2) { ctx.fillStyle = `rgba(255,225,77,${0.35 * (1 - w.t / 0.2)})`; ctx.fillRect(0, 0, W, H); }
+    }
+    for (const z of zaps) drawZap(z);
+    if (shoutT > 0) { // big BANANA! across the screen
+      const k = 1 - shoutT / 0.9, sc = k < 0.15 ? ease(k / 0.15) * 1.25 : 1.25 - Math.min(0.25, (k - 0.15) * 0.6);
+      ctx.save(); ctx.globalAlpha = Math.min(1, shoutT / 0.25);
+      ctx.translate(W / 2, oy + ROWS * T * 0.42); ctx.rotate(-0.06); ctx.scale(sc, sc);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '900 84px system-ui, sans-serif';
+      ctx.lineWidth = 12; ctx.strokeStyle = '#3a2a00'; ctx.strokeText('BANANA!', 0, 0);
+      ctx.fillStyle = '#ffe14d'; ctx.fillText('BANANA!', 0, 0);
+      ctx.font = '800 22px system-ui, sans-serif'; ctx.lineWidth = 6; ctx.strokeText('EVERY HEAD STUNNED', 0, 58);
+      ctx.fillStyle = '#fff'; ctx.fillText('EVERY HEAD STUNNED', 0, 58);
+      ctx.restore();
     }
     drawHUD();
     if (phase === 'intro') drawCard('THE FINAL FINAL BOSS', 'Eat bananas, drop peels, throw bananas with SPACE.', '#ff3b30', clamp01(phaseT / 0.3) * clamp01((2.6 - phaseT) / 0.4), 'LEVEL 3');
@@ -508,9 +538,37 @@
     ctx.restore();
   }
 
+  // A jagged lightning bolt from the snake to a head (it follows the head while it flickers).
+  function drawZap(z) {
+    const q = pos(z.h), x0 = sx(z.x0), y0 = sy(z.y0), x1 = sx(q.x), y1 = sy(q.y);
+    const len = Math.hypot(x1 - x0, y1 - y0) || 1, nx = -(y1 - y0) / len, ny = (x1 - x0) / len;
+    const reach = Math.min(1, z.t / 0.12), segs = Math.max(4, Math.round(len / 28));
+    ctx.save();
+    ctx.globalAlpha = z.t < 0.3 ? 1 : 1 - (z.t - 0.3) / 0.15;
+    ctx.shadowColor = '#ffe14d'; ctx.shadowBlur = 16; ctx.lineJoin = 'round';
+    for (const [w, c] of [[7, 'rgba(255,225,77,.55)'], [2.5, '#fffbe0']]) {
+      ctx.strokeStyle = c; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x0, y0);
+      for (let i = 1; i <= segs * reach; i++) {
+        const k = i / segs, j = i === segs ? 0 : Math.sin(z.seed + i * 12.9 + Math.floor(z.t * 30) * 3.1) * 14;
+        ctx.lineTo(x0 + (x1 - x0) * k + nx * j, y0 + (y1 - y0) * k + ny * j);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawHead(h) {
     const p = pos(h), x = sx(p.x), y = sy(p.y);
     ctx.save(); ctx.translate(x, y);
+    if (h.stun > 0 && h.zapped) { // frozen by the shout: a yellow glow and a ring counting down
+      const k = Math.max(0, h.stun / (h.stunMax || VOICE_STUN));
+      const g = ctx.createRadialGradient(0, 0, T * 0.2, 0, 0, T * 0.85);
+      g.addColorStop(0, 'rgba(255,225,77,.7)'); g.addColorStop(1, 'rgba(255,225,77,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, T * 0.85, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(0, 0, T * 0.66, 0, 7); ctx.stroke();
+      ctx.save(); ctx.shadowColor = '#ffe14d'; ctx.shadowBlur = 8; ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(0, 0, T * 0.66, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); ctx.stroke(); ctx.restore();
+    }
     if (!(h.hurt > 0 && Math.floor(h.hurt * 20) % 2)) {
       ctx.save(); ctx.rotate(h.rot); const s = T / 44; ctx.scale(DIRS[h.dir][0] < 0 ? -s : s, s);
       window.RickHead ? window.RickHead(ctx, h.stun > 0 ? 'dizzy' : 'normal') : (ctx.fillStyle = '#f2c7a0', ctx.beginPath(), ctx.arc(0, 0, 20, 0, 7), ctx.fill());
@@ -521,7 +579,10 @@
       ctx.fillStyle = i < h.hp ? '#ff5a4e' : 'rgba(255,255,255,.2)';
       ctx.beginPath(); ctx.arc((i - (h.max - 1) / 2) * 8, -T * 0.62, 3, 0, 7); ctx.fill();
     }
-    if (h.stun > 0) for (let i = 0; i < 3; i++) {
+    if (h.stun > 0 && h.zapped) for (let i = 0; i < 3; i++) { // little bananas orbiting the frozen head
+      const a = performance.now() / 220 + i * 2.1;
+      ctx.save(); ctx.translate(Math.cos(a) * T * 0.62, Math.sin(a) * T * 0.62); ctx.scale(0.42, 0.42); drawBanana(0, -T * 0.1); ctx.restore();
+    } else if (h.stun > 0) for (let i = 0; i < 3; i++) {
       const a = performance.now() / 150 + i * 2.1;
       ctx.fillStyle = '#ffe14d'; ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('★', Math.cos(a) * T * 0.4, -T * 0.4 + Math.sin(a) * 4);
     }
