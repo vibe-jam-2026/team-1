@@ -420,10 +420,10 @@
       if ((tempt += dt) > 2.4) { tempt = 0; if (button.t > 1.2) sfx('talk'); } // the tempting lines change
       // a heartbeat that speeds up the longer you resist
       if (button.t > 1.2 && (beatAt -= dt) <= 0) { sfx('heartbeat'); beatAt = Math.max(0.45, 1.1 - (button.t - 1.2) * 0.05); }
-      if (button.t > 1.5) { // the encouraging hand taps at the button, faster and faster
-        const period = Math.max(0.5, 1.3 - (button.t - 1.5) * 0.07);
+      if (button.t > 1.0) { // the teasing hand taps at the button, faster and faster
+        const period = Math.max(0.45, 0.9 - (button.t - 1.0) * 0.04);
         const before = button.tap || 0; button.tap = before + dt / period;
-        if (Math.floor(button.tap + 0.25) > Math.floor(before + 0.25)) sfx('click'); // as the finger reaches the button
+        if (Math.floor(button.tap + 0.25) > Math.floor(before + 0.25) && Math.floor(button.tap + 0.25) % 4 !== 0) sfx('click'); // finger reaches the button
       }
       if (button.t > BUTTON_WAIT + 1.2) { phase = 'victory'; phaseT = 0; sfx('fanfare'); setTimeout(() => sfx('sparkle'), 500); setTimeout(() => sfx('newBest'), 900); }
     }
@@ -668,35 +668,41 @@
     ctx.beginPath(); for (const y of [-0.08, 0.06]) { ctx.moveTo(-0.79, y); ctx.lineTo(-0.55, y); } ctx.stroke();
     ctx.beginPath(); for (const y of [-0.12, 0.0, 0.12]) { ctx.moveTo(-0.44, y); ctx.lineTo(-0.28, y); } ctx.stroke(); // stitching
   }
+  // The teasing hand: pokes the button three times, then wags its finger ("go on…").
+  // It gets faster and shakier the longer you resist, and never presses it itself.
   function drawCoaxingHand(cx, cy, R) {
     const t = phase === 'button' ? button.t : BUTTON_WAIT + 1.2;
-    if (t < 1.2) return;
-    const appear = ease(clamp01((t - 1.2) / 0.5));
-    const f = (button.tap || 0) % 1; // one jab per cycle
-    const jab = f < 0.6 ? 0 : f < 0.75 ? ease((f - 0.6) / 0.15) : 1 - (f - 0.75) / 0.25;
-    const tx = cx + R * 0.22, ty = cy - R * 0.2;                // where it pokes: the button's face, next to PRESS
-    const dx = 0.86, dy = -0.5;                                 // it comes from the right, slightly above
-    const dist = (R * 0.42 - jab * R * 0.36) + (1 - appear) * W * 0.6; // the tip stops just short of the button
-    const impatience = clamp01((t - 5) / 6);                     // shakes more and more
-    let hx = tx + dx * dist + (Math.random() - 0.5) * 10 * impatience, hy = ty + dy * dist + (Math.random() - 0.5) * 10 * impatience;
-    let angle = Math.atan2(ty - hy, tx - hx) + Math.sin(t * 7) * 0.06 * (1 - jab);
+    if (t < 0.7) return;
+    const appear = ease(clamp01((t - 0.7) / 0.45));
+    const tap = button.tap || 0, beat = Math.floor(tap) % 4, f = tap % 1;
+    const wag = beat === 3;                                      // every fourth beat: wag the finger instead of poking
+    const jab = wag ? 0 : f < 0.55 ? 0 : f < 0.72 ? ease((f - 0.55) / 0.17) : 1 - (f - 0.72) / 0.28;
+    const tx = cx + R * 0.25, ty = cy - R * 0.15;               // where it pokes: the button's face, next to PRESS
+    const dx = 0.93, dy = -0.37;                                // it comes from the right
+    const dist = (R * 0.5 - jab * R * 0.44) + (wag ? R * 0.12 : 0) + (1 - appear) * W * 0.7; // the tip stops just short
+    const impatience = clamp01((t - 4) / 6);                     // shakes more and more
+    let hx = tx + dx * dist + (Math.random() - 0.5) * 12 * impatience, hy = ty + dy * dist + (Math.random() - 0.5) * 12 * impatience;
+    let angle = Math.atan2(ty - hy, tx - hx) + (wag ? Math.sin(f * Math.PI * 6) * 0.45 : Math.sin(t * 7) * 0.05 * (1 - jab));
     let alpha = 1;
     if (phase === 'victory') { // it gives up and droops away
       const k = phaseT; hy += k * k * 500; angle += k * 1.5; alpha = 1 - clamp01((k - 0.6) / 0.6);
     }
-    // little "press here" ripples while the finger is down
-    if (phase === 'button' && f > 0.7) {
-      const k = (f - 0.7) / 0.3;
-      ctx.strokeStyle = `rgba(255,255,255,${0.6 * (1 - k)})`; ctx.lineWidth = 3;
-      for (const m of [1, 0.6]) { ctx.beginPath(); ctx.ellipse(tx, ty + 6, 14 + k * 50 * m, (14 + k * 50 * m) * 0.45, 0, 0, 7); ctx.stroke(); }
+    // "press here" ripples while the finger is down
+    if (phase === 'button' && !wag && f > 0.68) {
+      const k = (f - 0.68) / 0.32;
+      ctx.strokeStyle = `rgba(255,255,255,${0.7 * (1 - k)})`; ctx.lineWidth = 4;
+      for (const m of [1, 0.6]) { ctx.beginPath(); ctx.ellipse(tx, ty + 6, 16 + k * 60 * m, (16 + k * 60 * m) * 0.45, 0, 0, 7); ctx.stroke(); }
     }
+    const S = R * 0.6;
     ctx.save(); ctx.globalAlpha = alpha;
     ctx.translate(hx, hy); ctx.rotate(angle);
     if (Math.cos(angle) < 0) ctx.scale(1, -1); // keep the thumb on top
-    const S = R * 0.42; ctx.scale(S, S); ctx.translate(-0.58, 0); // the fingertip sits at (hx, hy)
+    ctx.scale(S, S); ctx.translate(-0.58, 0); // the fingertip sits at (hx, hy)
+    ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 12;
     drawGlove();
     ctx.restore();
   }
+
 
   // The reward: a huge red button. Pressing it loses; leaving it alone wins.
   function drawFinale() {
