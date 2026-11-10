@@ -420,6 +420,11 @@
       if ((tempt += dt) > 2.4) { tempt = 0; if (button.t > 1.2) sfx('talk'); } // the tempting lines change
       // a heartbeat that speeds up the longer you resist
       if (button.t > 1.2 && (beatAt -= dt) <= 0) { sfx('heartbeat'); beatAt = Math.max(0.45, 1.1 - (button.t - 1.2) * 0.05); }
+      if (button.t > 1.5) { // the encouraging hand taps at the button, faster and faster
+        const period = Math.max(0.5, 1.3 - (button.t - 1.5) * 0.07);
+        const before = button.tap || 0; button.tap = before + dt / period;
+        if (Math.floor(button.tap + 0.25) > Math.floor(before + 0.25)) sfx('click'); // as the finger reaches the button
+      }
       if (button.t > BUTTON_WAIT + 1.2) { phase = 'victory'; phaseT = 0; sfx('fanfare'); setTimeout(() => sfx('sparkle'), 500); setTimeout(() => sfx('newBest'), 900); }
     }
     if (phase === 'pressed' && phaseT > 3.2) finish('pressed');
@@ -651,6 +656,48 @@
     ctx.beginPath(); ctx.roundRect(-0.36, -0.29, 0.52, 0.58, 0.16); ctx.fill(); ctx.stroke();
   }
 
+  // A white cartoon glove that keeps poking at the button: "go on, press it". It never presses it.
+  function drawGlove() { // pointing along +x, in units of its own size
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#1b1b22'; ctx.lineWidth = 0.045; ctx.lineJoin = 'round';
+    const shape = (x, y, w, h, r, rot = 0) => { ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.beginPath(); ctx.roundRect(0, -h / 2, w, h, r); ctx.fill(); ctx.stroke(); ctx.restore(); };
+    shape(-0.36, -0.2, 0.34, 0.15, 0.075, -0.9);                   // thumb
+    ctx.beginPath(); ctx.roundRect(-0.56, -0.27, 0.56, 0.56, 0.2); ctx.fill(); ctx.stroke(); // palm
+    for (const y of [0.0, 0.11, 0.22]) shape(-0.06, y, 0.2, 0.12, 0.06); // curled fingers
+    shape(-0.08, -0.17, 0.66, 0.15, 0.075);                         // the pointing finger
+    ctx.beginPath(); ctx.roundRect(-0.82, -0.22, 0.3, 0.44, 0.08); ctx.fill(); ctx.stroke(); // cuff
+    ctx.beginPath(); for (const y of [-0.08, 0.06]) { ctx.moveTo(-0.79, y); ctx.lineTo(-0.55, y); } ctx.stroke();
+    ctx.beginPath(); for (const y of [-0.12, 0.0, 0.12]) { ctx.moveTo(-0.44, y); ctx.lineTo(-0.28, y); } ctx.stroke(); // stitching
+  }
+  function drawCoaxingHand(cx, cy, R) {
+    const t = phase === 'button' ? button.t : BUTTON_WAIT + 1.2;
+    if (t < 1.2) return;
+    const appear = ease(clamp01((t - 1.2) / 0.5));
+    const f = (button.tap || 0) % 1; // one jab per cycle
+    const jab = f < 0.6 ? 0 : f < 0.75 ? ease((f - 0.6) / 0.15) : 1 - (f - 0.75) / 0.25;
+    const tx = cx + R * 0.22, ty = cy - R * 0.2;                // where it pokes: the button's face, next to PRESS
+    const dx = 0.86, dy = -0.5;                                 // it comes from the right, slightly above
+    const dist = (R * 0.42 - jab * R * 0.36) + (1 - appear) * W * 0.6; // the tip stops just short of the button
+    const impatience = clamp01((t - 5) / 6);                     // shakes more and more
+    let hx = tx + dx * dist + (Math.random() - 0.5) * 10 * impatience, hy = ty + dy * dist + (Math.random() - 0.5) * 10 * impatience;
+    let angle = Math.atan2(ty - hy, tx - hx) + Math.sin(t * 7) * 0.06 * (1 - jab);
+    let alpha = 1;
+    if (phase === 'victory') { // it gives up and droops away
+      const k = phaseT; hy += k * k * 500; angle += k * 1.5; alpha = 1 - clamp01((k - 0.6) / 0.6);
+    }
+    // little "press here" ripples while the finger is down
+    if (phase === 'button' && f > 0.7) {
+      const k = (f - 0.7) / 0.3;
+      ctx.strokeStyle = `rgba(255,255,255,${0.6 * (1 - k)})`; ctx.lineWidth = 3;
+      for (const m of [1, 0.6]) { ctx.beginPath(); ctx.ellipse(tx, ty + 6, 14 + k * 50 * m, (14 + k * 50 * m) * 0.45, 0, 0, 7); ctx.stroke(); }
+    }
+    ctx.save(); ctx.globalAlpha = alpha;
+    ctx.translate(hx, hy); ctx.rotate(angle);
+    if (Math.cos(angle) < 0) ctx.scale(1, -1); // keep the thumb on top
+    const S = R * 0.42; ctx.scale(S, S); ctx.translate(-0.58, 0); // the fingertip sits at (hx, hy)
+    drawGlove();
+    ctx.restore();
+  }
+
   // The reward: a huge red button. Pressing it loses; leaving it alone wins.
   function drawFinale() {
     const t = phase === 'button' ? button.t : 99;
@@ -670,6 +717,7 @@
     ctx.font = `900 ${R * 0.26}px system-ui, sans-serif`;
     ctx.fillText(phase === 'victory' ? ':(' : 'PRESS', 0, -R * 0.04);
     ctx.restore();
+    if (phase === 'button' || phase === 'victory') drawCoaxingHand(cx, cy, R);
 
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     if (phase === 'button' && t < 3.4) { // the last level
